@@ -1,0 +1,21 @@
+name: security-scan
+
+# OPT-IN MODE: the only file a repository needs to scan its code and dependencies.
+
+on:
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: "17 6 * * 1"   # weekly: new advisories appear without any code change
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    # Same ref rule as lint.yml: the same full commit SHA.
+    uses: AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo/.github/workflows/security-scan.yml@REPLACE_WITH_FULL_SHA_OF_MAIN
+    with:
+      path: src                        # optional, defaults to the whole repo
+      requirements: requirements.txt   # optional, enables the dependency audit
+      # mode: report                   # optional, annotate without failing (phased rollout)

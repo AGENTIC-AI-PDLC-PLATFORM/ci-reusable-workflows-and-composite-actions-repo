@@ -1,0 +1,33 @@
+name: Install Python
+description: >-
+  Sets up a Python interpreter with actions/setup-python. By default the caller
+  job's PATH and python are left untouched (update-environment: false): run the
+  interpreter through the python-path output.
+
+inputs:
+  python-version:
+    description: Python version to install.
+    required: false
+    default: "3.12"
+  update-environment:
+    description: "'true' puts this Python on PATH for later steps; 'false' leaves the job's environment untouched."
+    required: false
+    default: "false"
+
+outputs:
+  python-path:
+    description: Absolute path of the installed interpreter.
+    value: ${{ steps.py.outputs.python-path }}
+  python-version:
+    description: Exact Python version installed.
+    value: ${{ steps.py.outputs.python-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      id: py
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: ${{ inputs.python-version }}
+        update-environment: ${{ inputs.update-environment }}

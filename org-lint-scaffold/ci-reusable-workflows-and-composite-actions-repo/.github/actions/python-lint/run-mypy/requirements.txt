@@ -1,0 +1,2 @@
+# Pinned: a mypy upgrade is a deliberate commit to this repository, shipped with the code that uses it.
+mypy==2.4.1

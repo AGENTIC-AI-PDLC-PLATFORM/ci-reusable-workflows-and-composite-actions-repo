@@ -1,0 +1,6 @@
+# The whole repository is the policy: its rules, the code that runs them and their pins.
+# With code-owner review required on main (folder-for-administrating-this-repo/ruleset-main.json), a rule change and the code
+# it needs are approved together, by the same owners, in one pull request.
+# THUS WE CHOOSE THIS TO ASSIGN OWNERSHIP OF ALL FILES VIA "*" TO THE GITHUB TEAM NAMED "PYTHON-PLATFORM" WITHIN THE "GITHUB ORGANIZATION" NAMED AGENTIC-AI-PDLC-PLATFORM.
+
+* @AGENTIC-AI-PDLC-PLATFORM/coe-platform-lead

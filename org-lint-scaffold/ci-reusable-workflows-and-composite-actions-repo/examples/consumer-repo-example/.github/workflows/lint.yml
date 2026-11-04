@@ -1,0 +1,22 @@
+name: lint
+
+# OPT-IN MODE: the only file a repository needs for lint + type checking.
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    # The only ref anyone chooses: a full commit SHA of main in the org CI repository.
+    # It moves only in a reviewed pull request (Dependabot's or yours), and every $/ reference
+    # inside the called workflow resolves to that same commit.
+    uses: AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo/.github/workflows/python-lint.yml@REPLACE_WITH_FULL_SHA_OF_MAIN
+    with:
+      path: src        # optional, defaults to the whole repo
+      # mode: report   # optional, annotate without failing (phased rollout)
+      # mypy-mode: report                    # optional, type checking reported only while ruff is enforced
+      # mypy-requirements: requirements.txt  # optional, lets mypy check calls into your dependencies

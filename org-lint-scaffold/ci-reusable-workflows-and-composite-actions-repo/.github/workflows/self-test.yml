@@ -1,0 +1,97 @@
+name: self-test
+
+# Proves the sentence at the top of ruff.toml and mypy.ini on every pull request, before the
+# commit exists on main where callers could pin it. $/ resolves to the commit under test, so the
+# policies, lint.py, typecheck.py, the action.yml files and the pins are always tested together,
+# exactly as callers will run them.
+# Both jobs are required status checks on main
+# (folder-for-administrating-this-repo/ruleset-main.json).
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-policy:
+    name: lint-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python for the tests
+        id: py
+        uses: $/.github/actions/common/install-python
+
+      # The ruff and mypy the actions install (their requirements.txt) and the test tools.
+      - name: Install the pinned ruff, the pinned mypy and the test tools
+        id: venv
+        uses: $/.github/actions/common/install-dependencies
+        with:
+          python-path: ${{ steps.py.outputs.python-path }}
+          venv: org-ci-self-test
+          requirements: |
+            .github/actions/python-lint/run-ruff/requirements.txt
+            .github/actions/python-lint/run-mypy/requirements.txt
+            tests/requirements.txt
+
+      # Pins match, findings match the expected lists, every uses: is this commit or a full SHA.
+      - name: Policy tests
+        shell: bash
+        env:
+          PYTHON_BIN: ${{ steps.venv.outputs.python }}
+        run: |
+          set -euo pipefail
+          "$PYTHON_BIN" -m pytest -q -p no:cacheprovider tests
+
+      # The same fixtures through the real actions: staged at run time, so a fixture is never a
+      # .py file of this repository for the org lint or type check to trip on.
+      - name: Stage the fixtures as Python files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p policy-fixture/ruff policy-fixture/mypy
+          cp tests/policy/ruff/violations.py.txt policy-fixture/ruff/violations.py
+          cp tests/policy/mypy/type_errors.py.txt policy-fixture/mypy/type_errors.py
+
+      - name: Run the org lint action on its fixture
+        id: ruff-fixture
+        uses: $/.github/actions/python-lint/run-ruff
+        with:
+          path: policy-fixture/ruff
+          mode: report
+
+      - name: Run the org type-check action on its fixture
+        id: mypy-fixture
+        uses: $/.github/actions/python-lint/run-mypy
+        with:
+          path: policy-fixture/mypy
+          mode: report
+
+      - name: The actions report exactly the expected findings
+        shell: bash
+        env:
+          RUFF_ISSUES: ${{ steps.ruff-fixture.outputs.issues }}
+          MYPY_ISSUES: ${{ steps.mypy-fixture.outputs.issues }}
+        run: |
+          set -euo pipefail
+          expected() { sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$1" | wc -l | tr -d ' '; }
+          ruff_expected=$(expected tests/policy/ruff/expected.txt)
+          mypy_expected=$(expected tests/policy/mypy/expected.txt)
+          echo "lint.py reported ${RUFF_ISSUES:-nothing}; tests/policy/ruff/expected.txt lists ${ruff_expected}."
+          echo "typecheck.py reported ${MYPY_ISSUES:-nothing}; tests/policy/mypy/expected.txt lists ${mypy_expected}."
+          [ "${RUFF_ISSUES:-}" = "${ruff_expected}" ] && [ "${MYPY_ISSUES:-}" = "${mypy_expected}" ]
+
+  self-lint:
+    # This repository's own Python (lint.py, typecheck.py, tests) under the policies it ships,
+    # through the real entry point: a rule change that breaks this code must fix it in the same PR.
+    name: self-lint
+    uses: $/.github/workflows/python-lint.yml
+    with:
+      mypy-requirements: tests/requirements.txt

@@ -1,0 +1,22 @@
+"""Org lint policy fixture: deliberate findings for every selected rule family (E9 aside).
+
+Stored as .py.txt so no linter treats it as code of this repository. tests/test_lint_policy.py
+and .github/workflows/self-test.yml feed it to ruff as violations.py; expected.txt lists what
+the policy must report on it.
+"""
+
+import sys
+import json
+import os, re
+
+
+def mutable_default(items=[]):
+    return items
+
+
+def compare(value):
+    if value == None:
+        return json.dumps(sys.argv)
+    unused = re.compile("x")
+    l = os.sep
+    return l

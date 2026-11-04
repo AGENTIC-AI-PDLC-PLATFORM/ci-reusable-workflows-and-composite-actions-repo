@@ -1,0 +1,57 @@
+name: Install dependencies
+description: >-
+  Creates a private virtual environment under RUNNER_TEMP and installs requirement
+  files and extra packages into it, so pinned tool dependencies never clash with
+  the project's own. Run the tools through the python output.
+
+inputs:
+  python-path:
+    description: Interpreter used to create the venv (the install-python output).
+    required: true
+  venv:
+    description: Venv directory name under RUNNER_TEMP. The same name reuses the same venv.
+    required: true
+  requirements:
+    description: >-
+      Requirement files, one per line (absolute, or relative to the workspace).
+      Installed in the order given, one pip call each: on a version conflict the later file wins.
+    required: false
+    default: ""
+  packages:
+    description: Extra pip arguments installed after the requirement files, whitespace-separated (e.g. "-e .[test]").
+    required: false
+    default: ""
+
+outputs:
+  python:
+    description: Path of the venv's Python interpreter.
+    value: ${{ steps.venv.outputs.python }}
+
+runs:
+  using: composite
+  steps:
+    # Inputs go through env, never inline ${{ }} in the script (prevents script injection).
+    - name: Create the venv and install
+      id: venv
+      shell: bash
+      env:
+        PYTHON_BIN: ${{ inputs.python-path }}
+        VENV_NAME: ${{ inputs.venv }}
+        REQUIREMENTS: ${{ inputs.requirements }}
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -euo pipefail
+        venv="$RUNNER_TEMP/$VENV_NAME"
+        "$PYTHON_BIN" -m venv "$venv"
+        if [ "$RUNNER_OS" = "Windows" ]; then py="$venv/Scripts/python.exe"; else py="$venv/bin/python"; fi
+        pip=("$py" -m pip install --quiet --disable-pip-version-check)
+        while IFS=$' \t' read -r req; do
+          [ -n "$req" ] || continue
+          "${pip[@]}" -r "$req"
+        done <<< "$REQUIREMENTS"
+        # No globbing while splitting, so ".[test]" reaches pip literally.
+        set -f
+        read -r -d '' -a extra <<< "$PACKAGES" || true
+        set +f
+        if [ "${#extra[@]}" -gt 0 ]; then "${pip[@]}" "${extra[@]}"; fi
+        echo "python=$py" >> "$GITHUB_OUTPUT"

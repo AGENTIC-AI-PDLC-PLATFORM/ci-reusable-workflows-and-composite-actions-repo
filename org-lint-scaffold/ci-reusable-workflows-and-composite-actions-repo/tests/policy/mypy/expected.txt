@@ -1,0 +1,8 @@
+# line:error-code, everything the org type-check policy (mypy.ini, with the mypy pinned in
+# run-mypy/requirements.txt) reports on type_errors.py.txt. A change that alters this list
+# updates it in the same commit: that diff is the rule change, as every consumer will see it.
+16:arg-type
+20:return-value
+24:union-attr
+28:arg-type
+31:assignment

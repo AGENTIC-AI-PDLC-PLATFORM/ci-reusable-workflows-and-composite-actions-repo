@@ -1,0 +1,81 @@
+name: Org Python type check (mypy)
+description: >-
+  Runs the organization's Python type-check policy with mypy. The implementation
+  (typecheck.py), the pinned mypy version and the policy (mypy.ini) ship inside
+  this action, and every $/ reference resolves to the same commit, so they are
+  always versioned together.
+
+inputs:
+  path:
+    description: Directory or file to type-check, relative to the workspace.
+    required: false
+    default: "."
+  python-version:
+    description: Python used to run mypy; also the target version unless the config sets python_version.
+    required: false
+    default: "3.12"
+  mode:
+    description: "'enforce' fails the step on findings; 'report' only annotates (phased rollout)."
+    required: false
+    default: enforce
+  config:
+    description: mypy config path in the calling repo (mypy.ini, setup.cfg or pyproject.toml). Empty = org policy bundled with this action.
+    required: false
+    default: ""
+  requirements:
+    description: >-
+      Requirement files of the calling repo, one per line, installed next to mypy so
+      calls into third-party packages are type-checked. Empty = none (the org policy
+      then treats untyped imports as Any).
+    required: false
+    default: ""
+  packages:
+    description: Extra pip arguments installed next to mypy, whitespace-separated (e.g. "types-requests" or "-e .").
+    required: false
+    default: ""
+
+outputs:
+  issues:
+    description: Number of findings.
+    value: ${{ steps.typecheck.outputs.issues }}
+
+runs:
+  using: composite
+  steps:
+    # $/ = this repository at the exact commit being run: no ref to keep in step.
+    # update-environment: false -> the caller job's PATH/python are left untouched.
+    - name: Set up Python for mypy
+      id: py
+      uses: $/.github/actions/common/install-python
+      with:
+        python-version: ${{ inputs.python-version }}
+        update-environment: "false"
+
+    # Private venv. The project's requirements go first and the org pin last,
+    # so the pinned mypy version always wins over one the project may list.
+    - name: Install pinned mypy and the project's dependencies
+      id: venv
+      uses: $/.github/actions/common/install-dependencies
+      with:
+        python-path: ${{ steps.py.outputs.python-path }}
+        venv: org-python-lint-mypy
+        requirements: |
+          ${{ inputs.requirements }}
+          ${{ github.action_path }}/requirements.txt
+        packages: ${{ inputs.packages }}
+
+    # Inputs go through env, never inline ${{ }} in the script (prevents script injection).
+    - name: Type check
+      id: typecheck
+      shell: bash
+      env:
+        TYPECHECK_PY: ${{ steps.venv.outputs.python }}
+        TYPECHECK_PATH: ${{ inputs.path }}
+        TYPECHECK_MODE: ${{ inputs.mode }}
+        TYPECHECK_CONFIG: ${{ inputs.config }}
+      run: |
+        set -euo pipefail
+        "$TYPECHECK_PY" "$GITHUB_ACTION_PATH/typecheck.py" \
+          --path "$TYPECHECK_PATH" \
+          --mode "$TYPECHECK_MODE" \
+          --config "${TYPECHECK_CONFIG:-$GITHUB_ACTION_PATH/mypy.ini}"

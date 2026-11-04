@@ -1,0 +1,2 @@
+# Pinned: a linter upgrade is a deliberate commit to this repository, shipped with the code that uses it.
+ruff==0.17.3

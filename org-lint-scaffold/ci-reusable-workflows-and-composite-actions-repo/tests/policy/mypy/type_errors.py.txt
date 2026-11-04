@@ -1,0 +1,31 @@
+"""Org type-check policy fixture: deliberate findings, and lines that show what mypy.ini changes.
+
+Stored as .py.txt so no checker treats it as code of this repository. tests/test_lint_policy.py
+and .github/workflows/self-test.yml type-check it as type_errors.py; expected.txt lists what
+the policy must report on it.
+"""
+
+import not_a_real_module_for_the_policy_fixture  # silent while ignore_missing_imports = True
+
+
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+def annotated() -> None:
+    add(1, "2")
+
+
+def wrong_return() -> int:
+    return "x"
+
+
+def maybe_none(text: str | None) -> int:
+    return text.count("a")
+
+
+def unannotated():
+    add("1", 2)  # reported only while check_untyped_defs = True
+
+
+value: str = None

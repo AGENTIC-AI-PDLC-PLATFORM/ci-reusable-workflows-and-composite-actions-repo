@@ -1,0 +1,14 @@
+# Moves this repository's org CI pin deliberately. Dependabot opens a pull request that changes
+# the commit SHA in lint.yml, test.yml and security-scan.yml (one group, one SHA). Those workflows
+# run the new policy on that pull request, so any fixes it needs land in the same pull request.
+# A SHA with no tag is moved to the latest commit of main: no release process is needed.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      org-ci:
+        patterns:
+          - "AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo*"

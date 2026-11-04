@@ -1,0 +1,15 @@
+# Org-wide Python lint policy. Versioned together with lint.py and action.yml:
+# a rule change ships in the same commit as the code; repos pinned to a SHA move deliberately.
+# How each part of that sentence is enforced: ENFORCEMENT.md at the repository root.
+
+# Must equal the ruff pin in requirements.txt (tests/test_lint_policy.py checks both).
+# Ruff refuses to run under any other version, so a ruff upgrade, which changes findings
+# just like a rule change, cannot ship without editing this file in the same commit.
+required-version = "==0.17.3"
+
+line-length = 100
+extend-exclude = [".venv", "build", "dist", "migrations"]
+
+[lint]
+# Ruff defaults (E4, E7, E9, F) + bugbear (B) + import sorting (I).
+select = ["E4", "E7", "E9", "F", "B", "I"]

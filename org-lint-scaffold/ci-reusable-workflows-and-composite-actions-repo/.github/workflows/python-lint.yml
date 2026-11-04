@@ -1,0 +1,106 @@
+name: org-python-lint
+
+# REUSABLE WORKFLOW: the org-facing entry point for Python lint + type checking.
+# Centralizes the whole job (runner, permissions, timeout, checkout); the Python
+# implementations live in the composite actions it calls (run-ruff, run-mypy).
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Directory or file to lint and type-check, relative to the repository root.
+        type: string
+        default: "."
+      python-version:
+        description: Python used to run ruff and mypy themselves.
+        type: string
+        default: "3.12"
+      mode:
+        description: "'enforce' fails the job on findings; 'report' only annotates."
+        type: string
+        default: enforce
+      mypy-mode:
+        description: "mypy only: empty = same as mode, or 'enforce', 'report', 'skip' (adopt type checking in phases)."
+        type: string
+        default: ""
+      ruff-config:
+        description: Ruff config path in the calling repo. Empty = org policy.
+        type: string
+        default: ""
+      mypy-config:
+        description: mypy config path in the calling repo (mypy.ini, setup.cfg or pyproject.toml). Empty = org policy.
+        type: string
+        default: ""
+      mypy-requirements:
+        description: Requirement files in the calling repo, one per line, installed next to mypy so third-party imports are type-checked. Empty = none.
+        type: string
+        default: ""
+      runs-on:
+        description: Runner label.
+        type: string
+        default: ubuntu-latest
+    outputs:
+      issues:
+        description: Number of findings (ruff + mypy).
+        value: ${{ jobs.lint.outputs.issues }}
+      ruff-issues:
+        description: Number of ruff findings.
+        value: ${{ jobs.lint.outputs.ruff-issues }}
+      mypy-issues:
+        description: Number of mypy findings (empty when mypy is skipped).
+        value: ${{ jobs.lint.outputs.mypy-issues }}
+
+# A called workflow can only keep or reduce the caller's permissions.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: python-lint
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 15
+    outputs:
+      issues: ${{ steps.total.outputs.issues }}
+      ruff-issues: ${{ steps.ruff.outputs.issues }}
+      mypy-issues: ${{ steps.mypy.outputs.issues }}
+    steps:
+      # In a called workflow the github context is the CALLER's,
+      # so this checks out the repository being linted, not this one.
+      - name: Check out the calling repository
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # $/ = THIS repository at the exact commit the caller selected: no checkout,
+      # no ref to keep in step. './.github/actions/...' would resolve inside the
+      # caller's checkout instead.
+      - name: Lint (ruff)
+        id: ruff
+        uses: $/.github/actions/python-lint/run-ruff
+        with:
+          path: ${{ inputs.path }}
+          python-version: ${{ inputs.python-version }}
+          mode: ${{ inputs.mode }}
+          config: ${{ inputs.ruff-config }}
+
+      # Runs even when ruff failed, so one push shows both kinds of findings.
+      - name: Type check (mypy)
+        id: mypy
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && (inputs.mypy-mode || inputs.mode) != 'skip' }}
+        uses: $/.github/actions/python-lint/run-mypy
+        with:
+          path: ${{ inputs.path }}
+          python-version: ${{ inputs.python-version }}
+          mode: ${{ inputs.mypy-mode || inputs.mode }}
+          config: ${{ inputs.mypy-config }}
+          requirements: ${{ inputs.mypy-requirements }}
+
+      - name: Count findings
+        id: total
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          RUFF_ISSUES: ${{ steps.ruff.outputs.issues }}
+          MYPY_ISSUES: ${{ steps.mypy.outputs.issues }}
+        run: echo "issues=$(( ${RUFF_ISSUES:-0} + ${MYPY_ISSUES:-0} ))" >> "$GITHUB_OUTPUT"

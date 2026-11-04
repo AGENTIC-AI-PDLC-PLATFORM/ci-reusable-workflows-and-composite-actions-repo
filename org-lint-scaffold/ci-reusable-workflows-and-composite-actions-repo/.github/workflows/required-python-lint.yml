@@ -1,0 +1,24 @@
+name: required-python-lint
+
+# ENFORCED MODE: the workflow an org ruleset runs on the pull requests of every targeted repository
+# (Require workflows to pass before merging -> this repository -> this file). Targeted repositories
+# need no file of their own, and their admins cannot remove it.
+# Point the ruleset at a full commit SHA of main, not at main: changing that SHA is the deliberate
+# move, made once self-test has passed on that commit (ENFORCEMENT.md).
+# No inputs are passed, so every targeted repository runs the org policies exactly as shipped here.
+
+on:
+  pull_request:
+  merge_group:   # needed if targeted repos use a merge queue
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    uses: $/.github/workflows/python-lint.yml   # same commit as the ruleset ref
+    # Phased rollout: annotations only first, then delete these lines to enforce.
+    # Type checking can stay in report (or skip) while ruff is already enforced.
+    # with:
+    #   mode: report
+    #   mypy-mode: report

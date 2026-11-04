@@ -1,0 +1,66 @@
+name: Org Python lint (ruff)
+description: >-
+  Runs the organization's Python lint policy. The implementation (lint.py),
+  the pinned dependencies and the policy (ruff.toml) ship inside this action,
+  and every $/ reference resolves to the same commit, so they are always
+  versioned together.
+
+inputs:
+  path:
+    description: Directory or file to lint, relative to the workspace.
+    required: false
+    default: "."
+  python-version:
+    description: Python used to run the linter itself (not your project's Python).
+    required: false
+    default: "3.12"
+  mode:
+    description: "'enforce' fails the step on findings; 'report' only annotates (phased rollout)."
+    required: false
+    default: enforce
+  config:
+    description: Ruff config path in the calling repo. Empty = org policy bundled with this action.
+    required: false
+    default: ""
+
+outputs:
+  issues:
+    description: Number of findings.
+    value: ${{ steps.lint.outputs.issues }}
+
+runs:
+  using: composite
+  steps:
+    # $/ = this repository at the exact commit being run: no ref to keep in step.
+    # update-environment: false -> the caller job's PATH/python are left untouched.
+    - name: Set up Python for the linter
+      id: py
+      uses: $/.github/actions/common/install-python
+      with:
+        python-version: ${{ inputs.python-version }}
+        update-environment: "false"
+
+    # Private venv -> pinned linter deps never clash with the project's own deps.
+    - name: Install pinned linter dependencies
+      id: venv
+      uses: $/.github/actions/common/install-dependencies
+      with:
+        python-path: ${{ steps.py.outputs.python-path }}
+        venv: org-python-lint-ruff
+        requirements: ${{ github.action_path }}/requirements.txt
+
+    # Inputs go through env, never inline ${{ }} in the script (prevents script injection).
+    - name: Lint
+      id: lint
+      shell: bash
+      env:
+        LINT_PY: ${{ steps.venv.outputs.python }}
+        LINT_PATH: ${{ inputs.path }}
+        LINT_MODE: ${{ inputs.mode }}
+        LINT_CONFIG: ${{ inputs.config }}
+      run: |
+        set -euo pipefail
+        "$LINT_PY" "$GITHUB_ACTION_PATH/lint.py" \
+          --path "$LINT_PATH" \
+          --mode "$LINT_MODE" \
+          --config "${LINT_CONFIG:-$GITHUB_ACTION_PATH/ruff.toml}"

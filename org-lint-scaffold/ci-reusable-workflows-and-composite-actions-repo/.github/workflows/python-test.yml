@@ -1,0 +1,103 @@
+name: org-python-test
+
+# REUSABLE WORKFLOW: runs the calling repository's pytest suite in a private venv.
+# Setup comes from the shared composite actions of this repository (common/).
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python used to run the tests.
+        type: string
+        default: "3.12"
+      requirements:
+        description: Requirement files in the calling repo, one per line, installed before testing (e.g. requirements-dev.txt).
+        type: string
+        default: ""
+      packages:
+        description: Extra pip arguments, whitespace-separated (e.g. "-e .[test]").
+        type: string
+        default: ""
+      path:
+        description: Tests to run (directory or file), relative to the repository root. Empty = pytest's own discovery (testpaths, else the whole repo).
+        type: string
+        default: ""
+      pytest-args:
+        description: Extra pytest arguments, whitespace-separated.
+        type: string
+        default: ""
+      allow-no-tests:
+        description: Pass instead of failing when pytest collects no tests (exit code 5).
+        type: boolean
+        default: false
+      runs-on:
+        description: Runner label.
+        type: string
+        default: ubuntu-latest
+      timeout-minutes:
+        description: Job timeout.
+        type: number
+        default: 20
+
+# A called workflow can only keep or reduce the caller's permissions.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: python-test
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      # In a called workflow the github context is the CALLER's,
+      # so this checks out the repository being tested, not this one.
+      - name: Check out the calling repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # $/ = THIS repository at the exact commit the caller selected: no checkout,
+      # no ref to keep in step.
+      - name: Set up Python
+        id: py
+        uses: $/.github/actions/common/install-python
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install the project's dependencies
+        id: venv
+        uses: $/.github/actions/common/install-dependencies
+        with:
+          python-path: ${{ steps.py.outputs.python-path }}
+          venv: org-python-test
+          requirements: ${{ inputs.requirements }}
+          packages: ${{ inputs.packages }}
+
+      # The venv is activated for this step, so tests that spawn `python` or console
+      # scripts get the same environment. Inputs go through env, never inline ${{ }}.
+      - name: Run pytest
+        shell: bash
+        env:
+          TEST_PY: ${{ steps.venv.outputs.python }}
+          TEST_PATH: ${{ inputs.path }}
+          PYTEST_ARGS: ${{ inputs.pytest-args }}
+          ALLOW_NO_TESTS: ${{ inputs.allow-no-tests }}
+        run: |
+          set -euo pipefail
+          bin_dir="$(dirname "$TEST_PY")"
+          venv_dir="$(dirname "$bin_dir")"
+          export VIRTUAL_ENV="$venv_dir" PATH="$bin_dir:$PATH"
+          # The project's own pytest wins; this pin is only a fallback.
+          "$TEST_PY" -c "import pytest" 2>/dev/null \
+            || "$TEST_PY" -m pip install --quiet --disable-pip-version-check "pytest==9.2.0"
+          set -f
+          read -r -d '' -a args <<< "$PYTEST_ARGS" || true
+          set +f
+          if [ -n "$TEST_PATH" ]; then args+=("$TEST_PATH"); fi
+          status=0
+          "$TEST_PY" -m pytest -ra ${args[@]+"${args[@]}"} || status=$?
+          if [ "$status" -eq 5 ] && [ "$ALLOW_NO_TESTS" = "true" ]; then
+            echo "::notice title=org-python-test::no tests collected (allowed by allow-no-tests)"
+            exit 0
+          fi
+          exit "$status"

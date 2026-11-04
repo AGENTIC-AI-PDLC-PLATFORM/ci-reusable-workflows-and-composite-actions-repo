@@ -1,0 +1,9 @@
+# line:rule, everything the org policy (ruff.toml, with the ruff pinned in requirements.txt)
+# reports on violations.py.txt. A change that alters this list updates it in the same commit:
+# that diff is the rule change, as every consumer will see it.
+8:I001
+10:E401
+13:B006
+18:E711
+20:F841
+21:E741
