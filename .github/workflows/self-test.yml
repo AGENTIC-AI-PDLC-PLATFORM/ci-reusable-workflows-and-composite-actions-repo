@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out this repository
+        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -88,9 +89,22 @@ jobs:
           echo "typecheck.py reported ${MYPY_ISSUES:-nothing}; tests/policy/mypy/expected.txt lists ${mypy_expected}."
           [ "${RUFF_ISSUES:-}" = "${ruff_expected}" ] && [ "${MYPY_ISSUES:-}" = "${mypy_expected}" ]
 
+      # mypy skips folders whose names start with a dot, so self-lint's type check (path ".")
+      # never reaches lint.py and typecheck.py under .github/. They are type-checked here, through
+      # the real action, and any finding fails this required job. Ruff needs no such step:
+      # self-lint's ruff already checks .github/.
+      - name: Type-check this repository's scripts under .github
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: $/.github/actions/python-lint/run-mypy
+        with:
+          path: .github
+          mode: enforce
+
   self-lint:
-    # This repository's own Python (lint.py, typecheck.py, tests) under the policies it ships,
-    # through the real entry point: a rule change that breaks this code must fix it in the same PR.
+    # This repository's own Python under the policies it ships, through the real entry point: a
+    # rule change that breaks this code must fix it in the same PR. Ruff checks lint.py,
+    # typecheck.py and tests/. mypy skips folders whose names start with a dot, so here it checks
+    # tests/, and the last step of lint-policy type-checks the scripts under .github/.
     name: self-lint
     uses: $/.github/workflows/python-lint.yml
     with:

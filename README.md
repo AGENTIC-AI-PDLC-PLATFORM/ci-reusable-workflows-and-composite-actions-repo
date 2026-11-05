@@ -7,6 +7,7 @@ Every internal reference uses `$/`, so a workflow and the actions it calls alway
 ci-reusable-workflows-and-composite-actions-repo/   → push as AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo
 ├── CODEOWNERS                    the policy owners review every change
 ├── ENFORCEMENT.md                how the versioning promise in ruff.toml and mypy.ini is enforced
+├── README.md                     this file
 ├── folder-for-administrating-this-repo/
 │   └── ruleset-main.json         ruleset for this repository's main: squash only, required checks
 ├── tests/                        policy tests, fixtures and their expected findings (self-test.yml)
@@ -32,6 +33,8 @@ ci-reusable-workflows-and-composite-actions-repo/   → push as AGENTIC-AI-PDLC-
                 ├── typecheck.py        the Python implementation (same contract as lint.py)
                 ├── requirements.txt    pinned mypy
                 └── mypy.ini            org type-check policy
+
+Not in this repository: next to its folder in org-lint-scaffold.zip, copied into each opt-in repo
 consumer-repo-example/.github/workflows/   lint.yml · test.yml · security-scan.yml (opt-in mode)
 consumer-repo-example/.github/dependabot.yml   moves the opt-in repo's SHA pin in reviewed pull requests
 ```
@@ -109,12 +112,14 @@ Type checking can follow later: `mypy-mode: report` (or `skip`) while ruff is al
 
 ## Test locally
 
+From the repository root:
+
 ```bash
-R=ci-reusable-workflows-and-composite-actions-repo/.github/actions/python-lint
+R=.github/actions/python-lint
 pip install -r $R/run-ruff/requirements.txt -r $R/run-mypy/requirements.txt
 python $R/run-ruff/lint.py      --path . --config $R/run-ruff/ruff.toml --mode report
 python $R/run-mypy/typecheck.py --path . --config $R/run-mypy/mypy.ini  --mode report
 # The policy tests that self-test.yml runs on every pull request:
-pip install -r ci-reusable-workflows-and-composite-actions-repo/tests/requirements.txt
-python -m pytest ci-reusable-workflows-and-composite-actions-repo/tests
+pip install -r tests/requirements.txt
+python -m pytest tests
 ```

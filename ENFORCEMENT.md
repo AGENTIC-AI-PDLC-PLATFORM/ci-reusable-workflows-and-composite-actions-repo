@@ -36,7 +36,8 @@ Third-party actions are pinned to what `@v7` resolved to on 2026-11-03:
      --enable-squash-merge --enable-merge-commit=false --enable-rebase-merge=false
    ```
 
-2. **Ruleset on `main`**, after the first push (the two checks must have run once, on a PR):
+2. **Ruleset on `main`**, after the first push (the two checks must have run once, on a PR) and once
+   the team in step 3 is ready:
 
    ```bash
    gh api --method POST repos/AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo/rulesets \
@@ -53,6 +54,22 @@ Third-party actions are pinned to what `@v7` resolved to on 2026-11-03:
    when the members already have access. Keep no CODEOWNERS file in `.github/` or `docs/`: GitHub
    reads `.github/`, then the root, then `docs/`, and uses the first one it finds.
 
+   Step 2 depends on two more points about that team:
+
+   - **It must be visible**, not secret: GitHub requires a code-owner team to be visible as well as
+     to have write access. Its privacy must read `closed`.
+   - **It needs at least two members.** The ruleset of step 2 requires a code owner's approval and
+     has no bypass actors, and the author of a pull request cannot approve it: a pull request opened
+     by the team's only member could never merge.
+
+   ```bash
+   # Write access for the team; then its privacy must print "closed" and its members at least two logins.
+   gh api --method PUT orgs/AGENTIC-AI-PDLC-PLATFORM/teams/coe-platform-lead/repos/AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo \
+     -f permission=push
+   gh api orgs/AGENTIC-AI-PDLC-PLATFORM/teams/coe-platform-lead --jq .privacy
+   gh api orgs/AGENTIC-AI-PDLC-PLATFORM/teams/coe-platform-lead/members --jq '.[].login'
+   ```
+
 4. **Dependabot access** (private or internal repository): organization settings, Security
    section, Global settings, *Grant Dependabot access to private repositories*: add this repository.
 
@@ -60,6 +77,7 @@ Third-party actions are pinned to what `@v7` resolved to on 2026-11-03:
    `.github/workflows/required-python-lint.yml` of this repository by commit SHA (the workflow
    entry has a `sha` field beside `ref`), not `main`. `$/` in that file resolves against this
    repository at that SHA. Changing the SHA is the deliberate move, done once `self-test` passed.
+   The commands: [Org ruleset (enforced mode)](#org-ruleset-enforced-mode).
 
 6. **Optional hardening**: the setting *Require actions to be pinned to a full-length commit SHA*
    (Settings, Actions, General) makes GitHub refuse any unpinned action at run time. It applies to
@@ -78,6 +96,68 @@ perl -pi -e "s/REPLACE_WITH_FULL_SHA_OF_MAIN/$SHA/" .github/workflows/*.yml
 
 Keep comments on the line above `uses:`: Dependabot treats a same-line comment as a version label.
 The SHA has no tag, so Dependabot moves it to the latest commit of `main`.
+
+## Org ruleset (enforced mode)
+
+The commands for step 5, run with `gh` signed in as an organization owner. Set `TARGETS` to the
+repositories to enforce, or `["~ALL"]`. Their visibility must fit this repository's: an internal
+repository serves internal and private repositories, a private one private repositories only, and
+public targets need a public one. This repository is excluded: `self-test` already lints each of
+its pull requests at that pull request's commit, and a faulty pinned policy must never block the
+pull request that fixes it. `do_not_enforce_on_create` keeps the rule from blocking the creation of
+repositories and branches.
+
+The pinned commit also sets the mode. As shipped, `required-python-lint.yml` passes no inputs, so
+ruff and mypy enforce from the first pull request. To start with annotations only, merge a pull
+request that uncomments its `with:` lines, then pin that commit; switching to enforce later is a
+pull request that deletes them, then a move of the SHA.
+
+```bash
+ORG=AGENTIC-AI-PDLC-PLATFORM
+CI=ci-reusable-workflows-and-composite-actions-repo
+CI_ID=$(gh api repos/$ORG/$CI --jq .id)
+SHA=$(gh api repos/$ORG/$CI/commits/main --jq .sha)
+TARGETS='["repo-a", "repo-b"]'   # the repositories to enforce, or '["~ALL"]'
+gh api --method POST orgs/$ORG/rulesets --input - <<EOF
+{
+  "name": "required-python-lint",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] },
+    "repository_name": { "include": $TARGETS, "exclude": ["$CI"] }
+  },
+  "rules": [
+    {
+      "type": "workflows",
+      "parameters": {
+        "do_not_enforce_on_create": true,
+        "workflows": [
+          { "repository_id": $CI_ID, "path": ".github/workflows/required-python-lint.yml", "sha": "$SHA" }
+        ]
+      }
+    }
+  ]
+}
+EOF
+```
+
+Check what GitHub stored: the workflow entry must show your SHA. Then open a pull request in one
+targeted repository: a `required-python-lint` run must appear in its checks. Pull requests that
+were already open run it only after a new commit, a branch update, or a close and reopen.
+
+```bash
+ID=$(gh api --paginate orgs/$ORG/rulesets --jq '.[] | select(.name == "required-python-lint") | .id')
+gh api orgs/$ORG/rulesets/$ID --jq '.rules[] | select(.type == "workflows") | .parameters.workflows'
+```
+
+To move the SHA, run the first block again with the same `TARGETS`, its `gh api` line replaced by
+this one (`ID` from the check above). The PUT sends the whole ruleset again:
+
+```bash
+gh api --method PUT orgs/$ORG/rulesets/$ID --input - <<EOF
+```
 
 ## What is still not enforced
 
