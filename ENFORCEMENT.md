@@ -112,51 +112,78 @@ ruff and mypy enforce from the first pull request. To start with annotations onl
 request that uncomments its `with:` lines, then pin that commit; switching to enforce later is a
 pull request that deletes them, then a move of the SHA.
 
+One block does both: it creates the ruleset when none named `required-python-lint` exists, and
+moves its SHA when one does, so the deliberate move is running the block again. It sends nothing
+unless the lookups worked and `TARGETS` is valid JSON. A failed `gh api` lookup prints GitHub's
+error JSON on stdout, so the block requires a numeric repository ID, a 40-character SHA and a
+ruleset ID that is a number or empty (no ruleset yet), and otherwise prints `NOT SENT` with the
+values it saw.
+
+The block needs `jq`. Install it once, on its own: pasted together with the block, sudo's password
+prompt or apt's question would read the next pasted lines as their answers.
+
 ```bash
-ORG=AGENTIC-AI-PDLC-PLATFORM
-CI=ci-reusable-workflows-and-composite-actions-repo
-CI_ID=$(gh api repos/$ORG/$CI --jq .id)
-SHA=$(gh api repos/$ORG/$CI/commits/main --jq .sha)
-TARGETS='["repo-a", "repo-b"]'   # the repositories to enforce, or '["~ALL"]'
-gh api --method POST orgs/$ORG/rulesets --input - <<EOF
-{
-  "name": "required-python-lint",
-  "target": "branch",
-  "enforcement": "active",
-  "bypass_actors": [],
-  "conditions": {
-    "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] },
-    "repository_name": { "include": $TARGETS, "exclude": ["$CI"] }
-  },
-  "rules": [
-    {
-      "type": "workflows",
-      "parameters": {
-        "do_not_enforce_on_create": true,
-        "workflows": [
-          { "repository_id": $CI_ID, "path": ".github/workflows/required-python-lint.yml", "sha": "$SHA" }
-        ]
-      }
-    }
-  ]
-}
-EOF
+sudo apt update && sudo apt install -y jq    # Ubuntu or WSL; on macOS: brew install jq
 ```
 
-Check what GitHub stored: the workflow entry must show your SHA. Then open a pull request in one
-targeted repository: a `required-python-lint` run must appear in its checks. Pull requests that
-were already open run it only after a new commit, a branch update, or a close and reopen.
+```bash
+export ORG=AGENTIC-AI-PDLC-PLATFORM
+export CI=ci-reusable-workflows-and-composite-actions-repo
+
+ID=$(gh api --paginate orgs/$ORG/rulesets --jq '.[] | select(.name == "required-python-lint") | .id')
+CI_ID=$(gh api repos/$ORG/$CI --jq .id)
+SHA=$(gh api repos/$ORG/$CI/commits/main --jq .sha)
+
+# A list targets only the repositories it names; '["~ALL"]' targets every repository, future ones
+# included. "exclude" always wins over "include". If this CI repository is private or internal,
+# public repositories can't use its workflows: exclude them next to $ci in the jq body below
+# (exclude: [$ci, "public-repo"]), or their pull requests would wait for a workflow that can't run.
+# For a move, keep TARGETS as it was: the PUT replaces the ruleset's conditions too.
+# TARGETS='["repo-a", "repo-b"]'
+TARGETS='["~ALL"]'
+
+if [[ $CI_ID =~ ^[0-9]+$ && $SHA =~ ^[0-9a-f]{40}$ ]] && BODY=$(jq -n \
+  --argjson targets "$TARGETS" \
+  --arg ci "$CI" \
+  --argjson ci_id "$CI_ID" \
+  --arg sha "$SHA" \
+  '{
+    name: "required-python-lint",
+    target: "branch",
+    enforcement: "active",
+    bypass_actors: [],
+    conditions: {
+      ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] },
+      repository_name: { include: $targets, exclude: [$ci] }
+    },
+    rules: [{
+      type: "workflows",
+      parameters: {
+        do_not_enforce_on_create: true,
+        workflows: [{ repository_id: $ci_id, path: ".github/workflows/required-python-lint.yml", sha: $sha }]
+      }
+    }]
+  }'); then
+  if [[ -z $ID ]]; then                  # no ruleset with that name yet: create it
+    gh api --method POST "orgs/$ORG/rulesets" --input - <<<"$BODY"
+  elif [[ $ID =~ ^[0-9]+$ ]]; then       # it exists: move its SHA
+    gh api --method PUT "orgs/$ORG/rulesets/$ID" --input - <<<"$BODY"
+  else
+    echo "NOT SENT: check ID='$ID'" >&2
+  fi
+else
+  echo "NOT SENT: check CI_ID='$CI_ID' SHA='$SHA' TARGETS='$TARGETS'" >&2
+fi
+```
+
+After each run, check what GitHub stored: the workflow entry must show your SHA. Then open a pull
+request in one targeted repository: a `required-python-lint` run must appear in its checks. Pull
+requests that were already open run it only after a new commit, a branch update, or a close and
+reopen.
 
 ```bash
 ID=$(gh api --paginate orgs/$ORG/rulesets --jq '.[] | select(.name == "required-python-lint") | .id')
 gh api orgs/$ORG/rulesets/$ID --jq '.rules[] | select(.type == "workflows") | .parameters.workflows'
-```
-
-To move the SHA, run the first block again with the same `TARGETS`, its `gh api` line replaced by
-this one (`ID` from the check above). The PUT sends the whole ruleset again:
-
-```bash
-gh api --method PUT orgs/$ORG/rulesets/$ID --input - <<EOF
 ```
 
 ## What is still not enforced
