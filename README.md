@@ -9,6 +9,12 @@ ci-reusable-workflows-and-composite-actions-repo/   → push as AGENTIC-AI-PDLC-
 ├── CODEOWNERS                    the policy owners review every change
 ├── ENFORCEMENT.md                how the versioning promise in ruff.toml and mypy.ini is enforced
 ├── README.md                     this file
+├── examples/
+│   └── consumer-repo-example/    templates for the opt-in repos: inert here, active once copied to their root
+│       ├── .pre-commit-config.yaml   the org's ruff and bandit checks before a commit (optional)
+│       └── .github/
+│           ├── dependabot.yml        moves the opt-in repo's SHA pin, and its Python dependencies, in reviewed pull requests
+│           └── workflows/            lint.yml · test.yml · security-scan.yml (opt-in mode)
 ├── folder-for-administrating-this-repo/
 │   └── ruleset-main.json         ruleset for this repository's main: squash only, required checks
 ├── tests/                        policy tests, fixtures and their expected findings (self-test.yml)
@@ -52,12 +58,45 @@ ci-reusable-workflows-and-composite-actions-repo/   → push as AGENTIC-AI-PDLC-
             └── verify-signatures/      action.yml, requirements.in, requirements.txt
                 ├── verify.py           checks the PyPI attestations of the pinned tools
                 └── publishers.toml     who must have signed each pinned tool
-
-Not in this repository: next to its folder in org-lint-scaffold.zip, copied into each opt-in repo
-consumer-repo-example/.github/workflows/   lint.yml · test.yml · security-scan.yml (opt-in mode)
-consumer-repo-example/.github/dependabot.yml   moves the opt-in repo's SHA pin, and its Python dependencies, in reviewed pull requests
-consumer-repo-example/.pre-commit-config.yaml  the org's ruff and bandit checks before a commit (optional)
 ```
+
+## What `examples/consumer-repo-example/` is
+
+The files an opt-in repository copies from here. In this repository they do nothing: GitHub runs only the
+workflows in `.github/workflows/` at the root of a repository, Dependabot reads only the root
+`.github/dependabot.yml`, and pre-commit only the root `.pre-commit-config.yaml`. Copied to the same paths at
+the root of an opt-in repo, they act there:
+
+| File, at the opt-in repo's root | What it does there |
+|---|---|
+| `.github/workflows/lint.yml` | Calls `python-lint.yml` (ruff + mypy) on every pull request and merge group |
+| `.github/workflows/test.yml` | Calls `python-test.yml` (pytest) on the same events |
+| `.github/workflows/security-scan.yml` | Calls `security-scan.yml` (bandit + semgrep + pip-audit) on the same events, and once a week: new advisories appear without any code change |
+| `.github/dependabot.yml` | Opens the pull requests that move the pin of the three workflows to the latest commit of this repository's `main` (one pull request for the three), and those that update the repo's own Python dependencies |
+| `.pre-commit-config.yaml` | Optional: the org's ruff and bandit checks on the developer's machine, before a commit exists |
+
+*Opt-in mode*: the repo chooses these files, and its admins can remove them. In enforced mode an org ruleset
+runs lint and the security scan with no file in the repo (*Adoption*, below); `test.yml`, `dependabot.yml`
+and the weekly run of `security-scan.yml` still come from here.
+
+To copy them, from the root of the opt-in repo, with an up-to-date clone of this repository next to it:
+
+```bash
+EX=../ci-reusable-workflows-and-composite-actions-repo/examples/consumer-repo-example
+mkdir -p .github/workflows
+# Remove from the list the files the repo does not want. A file the repo already has is kept, not replaced.
+for f in .github/workflows/lint.yml .github/workflows/test.yml .github/workflows/security-scan.yml \
+         .github/dependabot.yml .pre-commit-config.yaml; do
+  if [ -e "$f" ]; then echo "kept your $f: merge $EX/$f into it by hand"; else cp "$EX/$f" "$f"; fi
+done
+```
+
+Running it again changes nothing. Then replace `REPLACE_WITH_FULL_SHA_OF_MAIN` (*Setup*, step 6) and check
+the inputs the workflows set: `path: src` (lint, security scan) assumes the code is in `src/`, and
+`requirements: requirements.txt` (test) assumes that file exists. Delete a line to get its default.
+
+`tests/test_supply_chain.py` keeps one template in step with CI: it fails when the example
+`.pre-commit-config.yaml` pins another ruff or bandit than CI does, or runs them with other arguments.
 
 ## What `run-mypy` does
 
@@ -159,8 +198,8 @@ third-party actions. `ENFORCEMENT.md` has the one-time settings and what each ch
 
 ## Pre-commit hooks
 
-`.pre-commit-config.yaml` (this repository) and `consumer-repo-example/.pre-commit-config.yaml` (for opt-in
-repos) run ruff and bandit before a commit is created:
+`.pre-commit-config.yaml` (this repository) and `examples/consumer-repo-example/.pre-commit-config.yaml` (for
+opt-in repos) run ruff and bandit before a commit is created:
 
 ```bash
 pip install pre-commit && pre-commit install
@@ -185,7 +224,8 @@ CI stays the gate.
    No PAT is needed. Actions and reusable workflows in a private repo cannot be used by public repos.
 4. Push to `main`. There is no release step and nothing to tag.
 5. Apply the one-time settings in `ENFORCEMENT.md` (merge methods, ruleset, Dependabot access and alerts).
-6. In each opt-in repo, replace `REPLACE_WITH_FULL_SHA_OF_MAIN` with the current SHA of `main`:
+6. In each opt-in repo, copy the templates (*What `examples/consumer-repo-example/` is*, above), then replace
+   `REPLACE_WITH_FULL_SHA_OF_MAIN` with the current SHA of `main`:
 
    ```bash
    SHA=$(gh api repos/AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo/commits/main --jq .sha)
@@ -199,7 +239,7 @@ GitHub-hosted runners qualify. Update self-hosted runners first: older runners r
 
 | Mode | What you do | Result |
 |---|---|---|
-| Opt-in | Each repo adds the files it wants from `consumer-repo-example/.github/workflows/` | Status checks `lint / python-lint`, `test / python-test`, `security / security-scan`; make them required per repo if needed |
+| Opt-in | Each repo adds the files it wants from `examples/consumer-repo-example/.github/workflows/` | Status checks `lint / python-lint`, `test / python-test`, `security / security-scan`; make them required per repo if needed |
 | Enforced | An org ruleset: *Require workflows to pass before merging* → this repository @ a full commit SHA of `main` → `.github/workflows/required-python-lint.yml`; a second ruleset does the same with `required-security-scan.yml` | Runs on PRs of every targeted repo, no file in them, cannot be removed by repo admins. A failed run stops the merge |
 
 `required-python-lint.yml` calls `python-lint.yml` with no inputs, so every targeted repo runs the org
