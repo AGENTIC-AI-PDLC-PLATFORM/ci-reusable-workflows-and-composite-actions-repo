@@ -12,3 +12,14 @@ updates:
       org-ci:
         patterns:
           - "AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo*"
+
+  # Your Python dependencies. The org security scan (pip-audit) reports a known vulnerability in
+  # one of them; this is what opens the pull request that fixes it. Weekly version updates as
+  # written here, and an immediate pull request per advisory once Dependabot alerts and Dependabot
+  # security updates are switched on in the repository's security settings.
+  # directory: where requirements*.txt or pyproject.toml live. A project locked with uv uses
+  # package-ecosystem: uv instead.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly

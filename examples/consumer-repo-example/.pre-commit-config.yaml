@@ -1,0 +1,30 @@
+# OPT-IN: the org's Python checks on your machine, before the commit exists:
+#   pip install pre-commit && pre-commit install
+# The same tools, at the same versions, as the org CI repository runs at the commit this file was
+# copied from. Each rev is the full commit SHA of the release named in its "frozen:" comment.
+# Copy this file again when you move your org CI pin to a commit that changed the tools or the
+# lint policy: the checks below are a copy of that policy, CI is the policy.
+# A hook can be skipped (git commit --no-verify); CI cannot. This is fast feedback, not the gate.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 25bcf95026b96e2dd3c0aec3090c3d6ef6ca2e6c  # frozen: v0.17.3
+    hooks:
+      # The org lint policy (ruff.toml in the org CI repository), as arguments: your own ruff
+      # settings are not read, as in CI. --no-cache, as in CI too: the hook leaves no .ruff_cache
+      # folder in your repository.
+      - id: ruff-check
+        args:
+          - --isolated
+          - --select=E4,E7,E9,F,B,I
+          - --line-length=100
+          - --extend-exclude=.venv,build,dist,migrations
+          - --no-cache
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 92ae8b82fb422a639f0ed8d99e96cea769594e08  # frozen: 1.9.4
+    hooks:
+      # -ll -ii = severity and confidence medium or higher, the defaults of the org security scan.
+      # exclude = the folders the org scan skips.
+      - id: bandit
+        args: [-ll, -ii]
+        exclude: (^|/)(\.venv|build|dist|migrations)/

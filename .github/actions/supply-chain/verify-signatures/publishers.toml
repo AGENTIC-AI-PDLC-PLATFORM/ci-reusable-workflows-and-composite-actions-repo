@@ -1,0 +1,26 @@
+# Who must have signed each tool this repository installs from PyPI.
+# Versioned together with verify.py and the pins it checks: a pin change that breaks one of these
+# statements fails self-test in the same pull request (ENFORCEMENT.md).
+#
+# --require-hashes makes sure only the files hashed in a requirements.txt are installed. This file
+# says where those files must come from. PyPI keeps a Sigstore attestation next to a file uploaded
+# through trusted publishing: a statement, signed during the upload, naming the repository and
+# workflow that built the file. Sigstore is also what signs bandit's container image (cosign), but
+# that image is published as `latest` only and is not what CI installs: the wheel is.
+#
+# Every package pinned in a requirements.in of this repository is listed in exactly one table
+# (tests/test_supply_chain.py checks it).
+
+[signed]
+# Every locked file of these packages must carry an attestation that verifies and that was signed
+# by a workflow of this GitHub repository.
+bandit = "https://github.com/PyCQA/bandit"
+pip-audit = "https://github.com/pypa/pip-audit"
+semgrep = "https://github.com/semgrep/semgrep-proprietary"
+pypi-attestations = "https://github.com/pypi/pypi-attestations"
+pytest = "https://github.com/pytest-dev/pytest"
+
+[unsigned]
+# Upstream publishes no attestation for these, so --require-hashes is their only guarantee.
+# The check fails when one of them starts publishing attestations: move it to [signed] then.
+packages = ["ruff", "mypy", "pyyaml"]

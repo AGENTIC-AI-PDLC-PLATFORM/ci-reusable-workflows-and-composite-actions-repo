@@ -1,0 +1,6 @@
+# Advisory IDs pip-audit (the version pinned in run-pip-audit/requirements.in) must report on
+# vulnerable-pins.txt. This list is a minimum, not the whole report: new advisories keep being
+# published for an old version, and the audit must not need a commit here each time.
+PYSEC-2019-132
+PYSEC-2019-133
+PYSEC-2020-148

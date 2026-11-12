@@ -42,7 +42,8 @@ def _pinned(requirements: Path, package: str) -> str:
     """The exact version of `package` in a requirements file the action installs from."""
     found = [
         line
-        for line in _content_lines(requirements)
+        # Hash-locked files continue each requirement on its --hash lines: `name==X.Y.Z \`.
+        for line in (raw.rstrip("\\").strip() for raw in _content_lines(requirements))
         if re.split(r"[\s<>=!~;\[@]", line, maxsplit=1)[0].lower() == package
     ]
     where = requirements.relative_to(ROOT)

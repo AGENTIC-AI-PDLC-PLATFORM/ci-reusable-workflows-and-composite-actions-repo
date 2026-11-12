@@ -1,0 +1,68 @@
+name: Verify the signatures of the pinned tools
+description: >-
+  Checks where the files pinned in hash-locked requirements came from: for each package in the
+  policy (publishers.toml), every locked file must carry a PyPI attestation, signed through
+  Sigstore by a workflow of the repository the policy names. The implementation (verify.py),
+  the hash-locked verifier (requirements.txt) and the policy ship inside this action, and every
+  $/ reference resolves to the same commit, so they are always versioned together.
+
+inputs:
+  requirements:
+    description: Hash-locked requirement files to check, one per line (absolute, or relative to the workspace).
+    required: true
+  policy:
+    description: Policy path in the calling repo. Empty = the policy bundled with this action.
+    required: false
+    default: ""
+  python-version:
+    description: Python used to run the verifier (3.11 or newer).
+    required: false
+    default: "3.12"
+  offline:
+    description: >-
+      'true' verifies with the Sigstore trust root shipped in the pinned sigstore package instead
+      of refreshing it first (PyPI is still queried). 'false' refreshes it, as Sigstore intends.
+    required: false
+    default: "false"
+
+outputs:
+  verified:
+    description: Number of locked files that passed.
+    value: ${{ steps.verify.outputs.verified }}
+
+runs:
+  using: composite
+  steps:
+    # $/ = this repository at the exact commit being run: no ref to keep in step.
+    # update-environment: false -> the caller job's PATH/python are left untouched.
+    - name: Set up Python for the verifier
+      id: py
+      uses: $/.github/actions/common/install-python
+      with:
+        python-version: ${{ inputs.python-version }}
+        update-environment: "false"
+
+    # The verifier is pinned and hash-locked like the tools it checks, and checks itself too.
+    - name: Install the pinned verifier
+      id: venv
+      uses: $/.github/actions/common/install-dependencies
+      with:
+        python-path: ${{ steps.py.outputs.python-path }}
+        venv: org-supply-chain-verify-signatures
+        locked-requirements: ${{ github.action_path }}/requirements.txt
+
+    # Inputs go through env, never inline ${{ }} in the script (prevents script injection).
+    - name: Verify
+      id: verify
+      shell: bash
+      env:
+        VERIFY_PY: ${{ steps.venv.outputs.python }}
+        VERIFY_REQUIREMENTS: ${{ inputs.requirements }}
+        VERIFY_POLICY: ${{ inputs.policy }}
+        VERIFY_OFFLINE: ${{ inputs.offline }}
+      run: |
+        set -euo pipefail
+        args=(--policy "${VERIFY_POLICY:-$GITHUB_ACTION_PATH/publishers.toml}")
+        args+=(--requirements="$VERIFY_REQUIREMENTS")
+        if [ "$VERIFY_OFFLINE" = "true" ]; then args+=(--offline); fi
+        "$VERIFY_PY" "$GITHUB_ACTION_PATH/verify.py" "${args[@]}"

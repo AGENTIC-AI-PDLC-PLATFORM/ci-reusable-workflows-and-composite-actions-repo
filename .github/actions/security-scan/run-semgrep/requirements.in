@@ -1,0 +1,6 @@
+# Pinned: a scanner upgrade changes findings like a rule change, so it is a deliberate commit to
+# this repository, shipped with the rules and the code that use it.
+# This is the file to edit. requirements.txt beside it is generated from it and lists every
+# package, indirect ones included, with its sha256 hashes (installed with pip --require-hashes):
+#   uv pip compile requirements.in --universal --generate-hashes --python-version 3.11 -o requirements.txt
+semgrep==1.184.0

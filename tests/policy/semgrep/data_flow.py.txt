@@ -1,0 +1,77 @@
+"""Org Semgrep policy fixture (Python): deliberate findings, each next to a safe line.
+
+Stored as .py.txt so no scanner treats it as code of this repository. tests/test_security_policy.py
+and .github/workflows/self-test.yml scan it as data_flow.py; expected.txt lists what the rules in
+run-semgrep/rules/python.yml must report on it. Bandit judges each call on its own. These rules
+report a call only when the value that reaches it came from outside the program.
+"""
+
+import os
+import sqlite3
+import subprocess
+import sys
+
+from agents import function_tool
+from flask import Flask, request
+from langchain_community.vectorstores import FAISS
+from langchain_core.tools import tool
+from mcp.server.fastmcp import FastMCP
+
+app = Flask(__name__)
+mcp = FastMCP("fixture")
+
+
+def from_the_keyboard() -> None:
+    name = input("File to show: ")
+    command = "cat " + name
+    os.system(command)  # reported: input() -> name -> command
+    os.system("ls -l")  # silent: no outside value reaches the call
+
+
+def from_the_command_line() -> None:
+    target = sys.argv[1]
+    subprocess.run(f"ping -c 1 {target}", shell=True)  # reported
+    subprocess.run(["ping", "-c", "1", target])  # silent: argument list, no shell
+
+
+@app.route("/users")
+def from_an_http_request() -> str:
+    user_id = request.args["id"]
+    cursor = sqlite3.connect("app.db").cursor()
+    cursor.execute("SELECT name FROM users WHERE id = " + user_id)  # reported: statement text
+    cursor.execute("SELECT name FROM users WHERE id = ?", (user_id,))  # silent: query parameter
+    return "ok"
+
+
+@tool
+def run_shell(command: str) -> str:
+    """A tool the model can call: its argument is whatever the model wrote."""
+    return subprocess.check_output(command, shell=True, text=True)  # reported
+
+
+@tool("calculator", return_direct=True)
+def calculator(expression: str) -> str:
+    """Evaluate an arithmetic expression."""
+    return str(eval(expression))  # reported
+
+
+@function_tool
+def order_status(order: str) -> str:
+    """Look up an order."""
+    cursor = sqlite3.connect("app.db").cursor()
+    cursor.execute(f"SELECT status FROM orders WHERE id = '{order}'")  # reported
+    return "ok"
+
+
+@mcp.tool()
+def read_file(path: str) -> str:
+    """Return the content of a file."""
+    return os.popen("cat " + path).read()  # reported
+
+
+def not_a_tool(command: str) -> str:
+    return subprocess.check_output(command, shell=True, text=True)  # silent: caller unknown
+
+
+def load_index(path: str, embeddings: object) -> object:
+    return FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True)  # reported

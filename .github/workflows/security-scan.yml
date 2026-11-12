@@ -1,18 +1,28 @@
 name: org-security-scan
 
-# REUSABLE WORKFLOW: static security analysis of the calling repository's code
-# (bandit) and known-vulnerability audit of its dependencies (pip-audit).
-# Setup comes from the shared composite actions of this repository (common/).
+# REUSABLE WORKFLOW: the org-facing entry point for security scanning of the calling repository:
+# its code (bandit for Python; semgrep with the org's own rules, which also cover workflows and
+# Dockerfiles) and its dependencies (pip-audit).
+# Centralizes the whole job (runner, permissions, timeout, checkout); the implementations live in
+# the composite actions it calls (run-bandit, run-pip-audit, run-semgrep), one private venv each.
 
 on:
   workflow_call:
     inputs:
       path:
-        description: Directory or file to scan with bandit, relative to the repository root.
+        description: Directory or file to scan with bandit and semgrep, relative to the repository root.
         type: string
         default: "."
       requirements:
-        description: Requirement files to audit with pip-audit, one per line. Empty = no dependency audit.
+        description: Requirement or lock files to audit with pip-audit, one per line. Empty = the dependency files found in project-path.
+        type: string
+        default: ""
+      project-path:
+        description: "Directory where pip-audit looks for dependency files when requirements is empty: pylock.toml, else uv.lock, poetry.lock, pdm.lock or Pipfile.lock, else requirements*.txt, else pyproject.toml."
+        type: string
+        default: "."
+      ignore-vulns:
+        description: "Vulnerability IDs pip-audit accepts (PYSEC, GHSA or CVE), separated by whitespace: not reported, and listed in the job summary."
         type: string
         default: ""
       severity:
@@ -24,17 +34,42 @@ on:
         type: string
         default: medium
       mode:
-        description: "'enforce' fails the job on findings; 'report' only annotates."
+        description: "'enforce' fails the job on findings; 'report' only annotates. Every scanner follows it unless its own mode is set."
         type: string
         default: enforce
+      bandit-mode:
+        description: "bandit only: empty = same as mode, or 'enforce', 'report', 'skip'."
+        type: string
+        default: ""
+      semgrep-mode:
+        description: "semgrep only: empty = same as mode, or 'enforce', 'report', 'skip'."
+        type: string
+        default: ""
+      pip-audit-mode:
+        description: "pip-audit only: empty = same as mode, or 'enforce', 'report', 'skip'."
+        type: string
+        default: ""
       python-version:
-        description: Python used to run the scanners.
+        description: Python used to run the scanners (3.11 or newer).
         type: string
         default: "3.12"
       runs-on:
         description: Runner label.
         type: string
         default: ubuntu-latest
+    outputs:
+      issues:
+        description: Number of findings (bandit + semgrep + pip-audit).
+        value: ${{ jobs.scan.outputs.issues }}
+      bandit-issues:
+        description: Number of bandit findings (empty when bandit is skipped).
+        value: ${{ jobs.scan.outputs.bandit-issues }}
+      semgrep-issues:
+        description: Number of semgrep findings (empty when semgrep is skipped).
+        value: ${{ jobs.scan.outputs.semgrep-issues }}
+      pip-audit-issues:
+        description: Number of known vulnerabilities pip-audit reported (empty when pip-audit is skipped).
+        value: ${{ jobs.scan.outputs.pip-audit-issues }}
 
 # A called workflow can only keep or reduce the caller's permissions.
 permissions:
@@ -45,100 +80,71 @@ jobs:
     name: security-scan
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 15
+    outputs:
+      issues: ${{ steps.total.outputs.issues }}
+      bandit-issues: ${{ steps.bandit.outputs.issues }}
+      semgrep-issues: ${{ steps.semgrep.outputs.issues }}
+      pip-audit-issues: ${{ steps.pip-audit.outputs.issues }}
     steps:
       # In a called workflow the github context is the CALLER's,
       # so this checks out the repository being scanned, not this one.
+      # fetch-depth: semgrep compares a pull request with its base. Depth 2 holds the merge
+      # commit under test and both its parents; a merge group's base can be further back, so
+      # that event gets the full history. No credentials are kept, so nothing is fetched later.
       - name: Check out the calling repository
+        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'merge_group' && '0' || '2' }}
 
       # $/ = THIS repository at the exact commit the caller selected: no checkout,
-      # no ref to keep in step.
-      - name: Set up Python for the scanners
-        id: py
-        uses: $/.github/actions/common/install-python
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      # Pinned: a scanner upgrade is a deliberate commit to this repository.
-      - name: Install pinned scanners
-        id: venv
-        uses: $/.github/actions/common/install-dependencies
-        with:
-          python-path: ${{ steps.py.outputs.python-path }}
-          venv: org-security-scan
-          packages: bandit==1.9.4 pip-audit==2.10.1
-
-      # Inputs go through env, never inline ${{ }} in the script (prevents script injection).
+      # no ref to keep in step. Each scanner has its own mode: empty = the common one.
       - name: Scan code (bandit)
-        shell: bash
-        env:
-          SCAN_PY: ${{ steps.venv.outputs.python }}
-          SCAN_PATH: ${{ inputs.path }}
-          SCAN_SEVERITY: ${{ inputs.severity }}
-          SCAN_CONFIDENCE: ${{ inputs.confidence }}
-          SCAN_MODE: ${{ inputs.mode }}
-        run: |
-          set -euo pipefail
-          esc() { local v=$1; v=${v//'%'/%25}; v=${v//$'\r'/%0D}; v=${v//$'\n'/%0A}; printf '%s' "$v"; }
-          case "$SCAN_MODE" in
-            enforce) level=error ;;
-            report) level=warning ;;
-            *) echo "::error title=org-security-scan::invalid mode: $(esc "$SCAN_MODE")"; exit 2 ;;
-          esac
-          # bandit exits 0 on a missing path: checked here so a typo cannot pass silently.
-          if [ ! -e "$SCAN_PATH" ]; then
-            echo "::error title=org-security-scan::path not found: $(esc "$SCAN_PATH")"
-            exit 2
-          fi
-          out="$RUNNER_TEMP/bandit.txt"
-          status=0
-          # One annotation per finding; same exclusions as the org lint policy.
-          "$SCAN_PY" -m bandit -r "$SCAN_PATH" -q \
-            -x "/.venv/,/build/,/dist/,/migrations/" \
-            --severity-level "$SCAN_SEVERITY" --confidence-level "$SCAN_CONFIDENCE" \
-            -f custom --msg-template "::$level file={relpath},line={line},title=bandit {test_id} ({severity})::{msg}" \
-            > "$out" || status=$?
-          cat "$out"
-          count="$(grep -c '^::' "$out" || true)"
-          {
-            echo "### Code scan (bandit)"
-            echo ""
-            echo "Target \`$SCAN_PATH\` · severity ≥ \`$SCAN_SEVERITY\` · confidence ≥ \`$SCAN_CONFIDENCE\` · **$count finding(s)**"
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$status" -ne 0 ] && [ "$count" -eq 0 ]; then
-            echo "::error title=org-security-scan::bandit could not run (exit $status)"
-            exit 2
-          fi
-          if [ "$count" -gt 0 ] && [ "$SCAN_MODE" = "enforce" ]; then exit 1; fi
+        id: bandit
+        if: ${{ (inputs.bandit-mode || inputs.mode) != 'skip' }}
+        uses: $/.github/actions/security-scan/run-bandit
+        with:
+          path: ${{ inputs.path }}
+          python-version: ${{ inputs.python-version }}
+          mode: ${{ inputs.bandit-mode || inputs.mode }}
+          severity: ${{ inputs.severity }}
+          confidence: ${{ inputs.confidence }}
 
-      # Runs even when bandit failed, so one push shows both kinds of findings.
+      # Runs even when bandit failed, so one push shows every kind of finding.
+      # No requirements -> the action finds the dependency files in project-path itself.
       - name: Audit dependencies (pip-audit)
-        if: ${{ !cancelled() && steps.venv.outcome == 'success' && inputs.requirements != '' }}
+        id: pip-audit
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && (inputs.pip-audit-mode || inputs.mode) != 'skip' }}
+        uses: $/.github/actions/security-scan/run-pip-audit
+        with:
+          path: ${{ inputs.project-path }}
+          requirements: ${{ inputs.requirements }}
+          ignore-vulns: ${{ inputs.ignore-vulns }}
+          python-version: ${{ inputs.python-version }}
+          mode: ${{ inputs.pip-audit-mode || inputs.mode }}
+
+      # Last, because with a baseline semgrep moves the checkout to the base commit and back.
+      # baseline-commit: on a pull request, the base side of the merge commit under test (its
+      # first parent); in a merge queue, the commit the group is built on. Only findings that
+      # are not already there are reported, so only what the change adds can block it. Any
+      # other event (schedule, push) scans everything.
+      - name: Scan code (semgrep)
+        id: semgrep
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && (inputs.semgrep-mode || inputs.mode) != 'skip' }}
+        uses: $/.github/actions/security-scan/run-semgrep
+        with:
+          path: ${{ inputs.path }}
+          python-version: ${{ inputs.python-version }}
+          mode: ${{ inputs.semgrep-mode || inputs.mode }}
+          baseline-commit: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.event_name == 'merge_group' && github.event.merge_group.base_sha) || '' }}
+
+      - name: Count findings
+        id: total
+        if: ${{ !cancelled() }}
         shell: bash
         env:
-          SCAN_PY: ${{ steps.venv.outputs.python }}
-          SCAN_REQUIREMENTS: ${{ inputs.requirements }}
-          SCAN_MODE: ${{ inputs.mode }}
-        run: |
-          set -euo pipefail
-          report="$RUNNER_TEMP/pip-audit.md"
-          args=(--progress-spinner off --desc off -f markdown -o "$report")
-          while IFS=$' \t' read -r req; do
-            [ -n "$req" ] || continue
-            args+=(-r "$req")
-          done <<< "$SCAN_REQUIREMENTS"
-          status=0
-          "$SCAN_PY" -m pip_audit "${args[@]}" || status=$?
-          {
-            echo "### Dependency audit (pip-audit)"
-            echo ""
-            if [ -s "$report" ]; then cat "$report"; elif [ "$status" -eq 0 ]; then echo "No known vulnerabilities found."; fi
-          } >> "$GITHUB_STEP_SUMMARY"
-          # pip-audit exits 1 both for vulnerabilities and for its own errors (see the log).
-          if [ "$status" -ne 0 ] && [ "$SCAN_MODE" = "report" ]; then
-            echo "::warning title=org-security-scan::pip-audit exited $status (report mode: not failing the job)"
-            exit 0
-          fi
-          exit "$status"
+          BANDIT_ISSUES: ${{ steps.bandit.outputs.issues }}
+          SEMGREP_ISSUES: ${{ steps.semgrep.outputs.issues }}
+          PIP_AUDIT_ISSUES: ${{ steps.pip-audit.outputs.issues }}
+        run: echo "issues=$(( ${BANDIT_ISSUES:-0} + ${SEMGREP_ISSUES:-0} + ${PIP_AUDIT_ISSUES:-0} ))" >> "$GITHUB_OUTPUT"

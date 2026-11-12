@@ -1,0 +1,35 @@
+name: required-security-scan
+
+# ENFORCED MODE: the workflow an org ruleset runs on the pull requests of every targeted repository
+# (Require workflows to pass before merging -> this repository -> this file). Targeted repositories
+# need no file of their own, and their admins cannot remove it. A failed scan stops the merge.
+# Point the ruleset at a full commit SHA of main, not at main: changing that SHA is the deliberate
+# move, made once self-test has passed on that commit (ENFORCEMENT.md).
+# No inputs are passed, so every targeted repository runs the org scan exactly as shipped here:
+# bandit and semgrep on the whole repository, pip-audit on the dependency files at its root.
+# On these two events semgrep reports only what the pull request or the merge group adds.
+
+on:
+  pull_request:
+  merge_group:   # needed if targeted repos use a merge queue
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    uses: $/.github/workflows/security-scan.yml   # same commit as the ruleset ref
+    # Phased rollout: annotations only first, then delete these lines to enforce.
+    # Each scanner can follow later. Bandit has no baseline: it reports every finding of a
+    # repository, old ones included, so it can stay in report (or skip) while semgrep and
+    # pip-audit are already enforced.
+    # with:
+    #   mode: report
+    #   bandit-mode: report
+    #
+    # A vulnerability the org accepts (no fixed version yet, or the vulnerable code is not used)
+    # is accepted here, for every targeted repository at once. Put the reason in a comment that
+    # names the ID: tests/test_supply_chain.py fails for an ID accepted without one.
+    # with:
+    #   ignore-vulns: |
+    #     GHSA-xxxx-xxxx-xxxx

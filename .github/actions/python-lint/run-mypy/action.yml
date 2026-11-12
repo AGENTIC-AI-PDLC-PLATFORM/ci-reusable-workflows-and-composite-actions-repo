@@ -53,15 +53,16 @@ runs:
 
     # Private venv. The project's requirements go first and the org pin last,
     # so the pinned mypy version always wins over one the project may list.
+    # locked-requirements is installed after requirements, with pip --require-hashes: only the
+    # files hashed in this action's requirements.txt install as mypy and its dependencies.
     - name: Install pinned mypy and the project's dependencies
       id: venv
       uses: $/.github/actions/common/install-dependencies
       with:
         python-path: ${{ steps.py.outputs.python-path }}
         venv: org-python-lint-mypy
-        requirements: |
-          ${{ inputs.requirements }}
-          ${{ github.action_path }}/requirements.txt
+        requirements: ${{ inputs.requirements }}
+        locked-requirements: ${{ github.action_path }}/requirements.txt
         packages: ${{ inputs.packages }}
 
     # Inputs go through env, never inline ${{ }} in the script (prevents script injection).

@@ -1,0 +1,5 @@
+# Pinned: a mypy upgrade is a deliberate commit to this repository, shipped with the code that uses it.
+# This is the file to edit. requirements.txt beside it is generated from it and lists every
+# package, indirect ones included, with its sha256 hashes (installed with pip --require-hashes):
+#   uv pip compile requirements.in --universal --generate-hashes --python-version 3.10 -o requirements.txt
+mypy==2.4.1

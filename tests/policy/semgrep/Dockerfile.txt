@@ -1,0 +1,12 @@
+# Org Semgrep policy fixture (Dockerfile): deliberate findings, each next to a safe line.
+# Stored as Dockerfile.txt so nothing builds or scans it as part of this repository.
+# tests/test_security_policy.py and .github/workflows/self-test.yml scan it as Dockerfile;
+# expected.txt lists what run-semgrep/rules/dockerfile.yml must report on it.
+FROM python:latest
+FROM python
+FROM python:3.12-slim AS builder
+FROM python@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+FROM builder AS runtime
+FROM scratch
+FROM ghcr.io/example/base:latest AS tools
+RUN echo "fixture"

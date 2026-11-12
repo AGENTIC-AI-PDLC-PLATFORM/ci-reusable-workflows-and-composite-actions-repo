@@ -1,0 +1,5 @@
+# Org dependency-audit fixture: one deliberately old pin with known vulnerabilities.
+# Stored as vulnerable-pins.txt, not requirements.txt, so nothing treats it as a dependency of
+# this repository. tests/test_security_policy.py and .github/workflows/self-test.yml audit it as
+# requirements.txt; expected.txt lists what pip-audit must at least report on it.
+urllib3==1.24.1

@@ -1,0 +1,73 @@
+name: Org code scan (semgrep)
+description: >-
+  Runs semgrep with the organization's own rules: checks that follow a value from where it
+  enters the program to where it is used, rules the organization wrote itself, and code that
+  is not Python (workflows, Dockerfiles). The implementation (rule_scan.py), the hash-locked
+  semgrep (requirements.txt) and the rules (rules/) ship inside this action, and every $/
+  reference resolves to the same commit, so they are always versioned together.
+
+inputs:
+  path:
+    description: Directory or file to scan, relative to the workspace.
+    required: false
+    default: "."
+  python-version:
+    description: Python used to run semgrep itself (not your project's Python).
+    required: false
+    default: "3.12"
+  mode:
+    description: "'enforce' fails the step on findings; 'report' only annotates (phased rollout)."
+    required: false
+    default: enforce
+  baseline-commit:
+    description: >-
+      A git revision already in the checkout (a SHA, or HEAD^1 on a pull request's merge
+      commit). Semgrep then reports only the findings that are not already in that commit:
+      the ones the change adds. Empty = report every finding in `path`.
+    required: false
+    default: ""
+
+outputs:
+  issues:
+    description: Number of findings.
+    value: ${{ steps.scan.outputs.issues }}
+
+runs:
+  using: composite
+  steps:
+    # $/ = this repository at the exact commit being run: no ref to keep in step.
+    # update-environment: false -> the caller job's PATH/python are left untouched.
+    - name: Set up Python for semgrep
+      id: py
+      uses: $/.github/actions/common/install-python
+      with:
+        python-version: ${{ inputs.python-version }}
+        update-environment: "false"
+
+    # Private venv -> semgrep's many pinned dependencies never clash with another scanner's
+    # or the project's.
+    # locked-requirements -> pip --require-hashes: only files hashed in requirements.txt install.
+    - name: Install the pinned semgrep
+      id: venv
+      uses: $/.github/actions/common/install-dependencies
+      with:
+        python-path: ${{ steps.py.outputs.python-path }}
+        venv: org-security-scan-semgrep
+        locked-requirements: ${{ github.action_path }}/requirements.txt
+
+    # Inputs go through env, never inline ${{ }} in the script (prevents script injection).
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        SCAN_PY: ${{ steps.venv.outputs.python }}
+        SCAN_PATH: ${{ inputs.path }}
+        SCAN_MODE: ${{ inputs.mode }}
+        SCAN_BASELINE: ${{ inputs.baseline-commit }}
+      run: |
+        set -euo pipefail
+        "$SCAN_PY" "$GITHUB_ACTION_PATH/rule_scan.py" \
+          --path "$SCAN_PATH" \
+          --mode "$SCAN_MODE" \
+          --config "$GITHUB_ACTION_PATH/rules" \
+          --baseline-commit="$SCAN_BASELINE"

@@ -1,0 +1,47 @@
+# Org Semgrep rules for GitHub Actions workflows and actions (YAML, so out of bandit's reach).
+# Versioned together with rule_scan.py and action.yml: a rule change ships in the same commit as
+# the code; repos pinned to a SHA move deliberately (ENFORCEMENT.md).
+# Both rules are conventions this repository already follows in its own workflows and actions.
+# Every rule has a case in tests/policy/semgrep/, listed in its expected.txt.
+rules:
+  - id: org.github-actions.untrusted-expression-in-run
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      An expression that the author of the event, the branch name or an input controls is
+      expanded inside a run script before the shell reads it (script injection). Pass it through
+      env: and use "$VAR" in the script.
+    metadata:
+      category: security
+      cwe: "CWE-94: Improper Control of Generation of Code"
+    paths:
+      include: &workflow-and-action-files
+        - "**/.github/workflows/*.yml"
+        - "**/.github/workflows/*.yaml"
+        - "**/action.yml"
+        - "**/action.yaml"
+    patterns:
+      - pattern: "run: $SCRIPT"
+      - metavariable-regex:
+          metavariable: $SCRIPT
+          regex: (?s).*\$\{\{[^}]*\b(github\.event\.|github\.head_ref\b|inputs\.)[^}]*\}\}
+
+  - id: org.github-actions.action-not-pinned-to-sha
+    languages: [yaml]
+    severity: ERROR
+    message: >-
+      This action or reusable workflow is referenced by a tag or branch, which its owner can move
+      to other code. Pin the full 40-character commit SHA (a container image: its sha256 digest)
+      and keep the version in a comment.
+    metadata:
+      category: security
+      cwe: "CWE-829: Inclusion of Functionality from Untrusted Control Sphere"
+    paths:
+      include: *workflow-and-action-files
+    patterns:
+      - pattern: "uses: $USES"
+      - metavariable-regex:
+          metavariable: $USES
+          # Flagged: owner/repo[/path]@<anything but 40 hex digits>, and docker://image without
+          # a digest. Not flagged: ./local and $/same-commit references.
+          regex: ^(docker://(?!.+@sha256:[0-9a-f]{64}$).+|(?![.$]/)(?!docker://)[^@]+@(?![0-9a-f]{40}$).+)$

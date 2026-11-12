@@ -1,0 +1,46 @@
+"""Org code-scan policy fixture (bandit): deliberate findings, and lines that show what the
+thresholds change.
+
+Stored as .py.txt so no scanner treats it as code of this repository. tests/test_security_policy.py
+and .github/workflows/self-test.yml scan it as insecure.py; expected.txt lists what bandit must
+report on it at the org thresholds (severity medium, confidence medium).
+"""
+
+import subprocess
+
+import torch
+import yaml
+from transformers import AutoModel
+
+API_TOKEN = "not-a-real-token-for-the-policy-fixture"  # low severity: silent at the org threshold
+
+
+def run(command: str) -> None:
+    subprocess.call(command, shell=True)
+
+
+def run_accepted(command: str) -> None:
+    subprocess.call(command, shell=True)  # nosec B602
+
+
+def load_settings(text: str) -> object:
+    return yaml.load(text, Loader=yaml.Loader)
+
+
+def user_query(user_id: str) -> str:
+    # Medium severity but low confidence: silent at the org threshold.
+    return "SELECT name FROM users WHERE id = '%s'" % user_id
+
+
+def load_weights() -> object:
+    return torch.load("weights.pth")
+
+
+def load_weights_safely() -> object:
+    return torch.load("weights.pth", weights_only=True)
+
+
+def download_models() -> None:
+    AutoModel.from_pretrained("org/model")
+    AutoModel.from_pretrained("org/model", revision="v1.0")
+    AutoModel.from_pretrained("org/model", revision="5d0f2e8a7f1b4c9d6e3a2b1c0d9e8f7a6b5c4d3e")

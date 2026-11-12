@@ -41,13 +41,14 @@ runs:
         update-environment: "false"
 
     # Private venv -> pinned linter deps never clash with the project's own deps.
+    # locked-requirements -> pip --require-hashes: only files hashed in requirements.txt install.
     - name: Install pinned linter dependencies
       id: venv
       uses: $/.github/actions/common/install-dependencies
       with:
         python-path: ${{ steps.py.outputs.python-path }}
         venv: org-python-lint-ruff
-        requirements: ${{ github.action_path }}/requirements.txt
+        locked-requirements: ${{ github.action_path }}/requirements.txt
 
     # Inputs go through env, never inline ${{ }} in the script (prevents script injection).
     - name: Lint

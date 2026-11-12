@@ -17,6 +17,14 @@ inputs:
       Installed in the order given, one pip call each: on a version conflict the later file wins.
     required: false
     default: ""
+  locked-requirements:
+    description: >-
+      Hash-locked requirement files, one per line, installed after `requirements` with
+      pip --require-hashes: every package in the file must be pinned (==) with its sha256, and
+      pip refuses anything it downloads that matches none of them. This repository's own tool
+      pins are installed this way (the requirements.txt generated next to each requirements.in).
+    required: false
+    default: ""
   packages:
     description: Extra pip arguments installed after the requirement files, whitespace-separated (e.g. "-e .[test]").
     required: false
@@ -38,6 +46,7 @@ runs:
         PYTHON_BIN: ${{ inputs.python-path }}
         VENV_NAME: ${{ inputs.venv }}
         REQUIREMENTS: ${{ inputs.requirements }}
+        LOCKED_REQUIREMENTS: ${{ inputs.locked-requirements }}
         PACKAGES: ${{ inputs.packages }}
       run: |
         set -euo pipefail
@@ -49,6 +58,12 @@ runs:
           [ -n "$req" ] || continue
           "${pip[@]}" -r "$req"
         done <<< "$REQUIREMENTS"
+        # Hash-checking mode: an unpinned or unhashed line, or a download whose sha256 is not
+        # in the file, fails the step instead of being installed.
+        while IFS=$' \t' read -r req; do
+          [ -n "$req" ] || continue
+          "${pip[@]}" --require-hashes -r "$req"
+        done <<< "$LOCKED_REQUIREMENTS"
         # No globbing while splitting, so ".[test]" reaches pip literally.
         set -f
         read -r -d '' -a extra <<< "$PACKAGES" || true

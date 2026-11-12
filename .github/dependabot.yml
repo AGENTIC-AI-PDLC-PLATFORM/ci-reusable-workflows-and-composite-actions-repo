@@ -1,0 +1,103 @@
+# Keeps this repository's own pins moving, in pull requests where self-test runs the new versions.
+# The tools installed here are dependencies of every repository that calls this one: tooling-audit
+# (self-test.yml) finds a known vulnerability in a pin, and Dependabot proposes the update.
+#
+# Lock files: each tool has a requirements.in (the pin a person edits) and a requirements.txt that
+# uv generates from it, with every package and its hashes. Dependabot's uv support regenerates the
+# requirements.txt with the options written in its header (--universal --generate-hashes
+# --python-version), so a proposed update is installable under pip --require-hashes as it stands.
+# - One entry per tool: each tool moves in its own pull request. A ruff or mypy update still
+#   needs its policy edits (required-version, expected findings, pre-commit rev) in that pull
+#   request before self-test passes: that is the deliberate move ENFORCEMENT.md describes.
+# - dependency-type all: the indirect pins of a lock are updated too, not only the tool itself.
+# Security updates (a pull request as soon as an advisory matches a pin) also need Dependabot
+# alerts and Dependabot security updates switched on for this repository: ENFORCEMENT.md.
+# tests/test_supply_chain.py fails when a lock file or a third-party action is not covered here.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /.github/actions/python-lint/run-ruff
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-type: all
+    groups:
+      ruff:
+        patterns:
+          - "*"
+
+  - package-ecosystem: uv
+    directory: /.github/actions/python-lint/run-mypy
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-type: all
+    groups:
+      mypy:
+        patterns:
+          - "*"
+
+  - package-ecosystem: uv
+    directory: /.github/actions/security-scan/run-bandit
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-type: all
+    groups:
+      bandit:
+        patterns:
+          - "*"
+
+  - package-ecosystem: uv
+    directory: /.github/actions/security-scan/run-pip-audit
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-type: all
+    groups:
+      pip-audit:
+        patterns:
+          - "*"
+
+  - package-ecosystem: uv
+    directory: /.github/actions/security-scan/run-semgrep
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-type: all
+    groups:
+      semgrep:
+        patterns:
+          - "*"
+
+  - package-ecosystem: uv
+    directory: /.github/actions/supply-chain/verify-signatures
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-type: all
+    groups:
+      verify-signatures:
+        patterns:
+          - "*"
+
+  - package-ecosystem: uv
+    directory: /tests
+    schedule:
+      interval: weekly
+    allow:
+      - dependency-type: all
+    groups:
+      test-tools:
+        patterns:
+          - "*"
+
+  # Third-party actions, pinned to full commit SHAs: the workflows (directory /) and the one
+  # composite action that calls a third-party action. Dependabot moves the SHA and the version
+  # comment beside it. $/ references are this repository at the running commit: nothing to move.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/common/install-python
+    schedule:
+      interval: weekly

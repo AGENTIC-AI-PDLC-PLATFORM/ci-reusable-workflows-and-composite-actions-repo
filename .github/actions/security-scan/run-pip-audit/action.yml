@@ -1,0 +1,93 @@
+name: Org dependency audit (pip-audit)
+description: >-
+  Audits Python dependencies for known vulnerabilities with pip-audit. It finds what to audit
+  by itself (a lock file, requirements*.txt or pyproject.toml), or audits the files it is
+  given. The implementation (audit.py) and the hash-locked pip-audit (requirements.txt)
+  ship inside this action, and every $/ reference resolves to the same commit, so they are
+  always versioned together.
+
+inputs:
+  path:
+    description: >-
+      Directory searched for dependency files when `requirements` is empty, relative to the
+      workspace. The first of these is audited: pylock.toml or pylock.*.toml; the lock file of
+      uv, Poetry, PDM or Pipenv (uv.lock, poetry.lock, pdm.lock, Pipfile.lock);
+      requirements*.txt; pyproject.toml. A lock file gives the exact locked versions; the
+      declared ranges of the others are resolved by pip-audit.
+    required: false
+    default: "."
+  requirements:
+    description: >-
+      Files to audit, one per line (absolute, or relative to the workspace). They replace the
+      search in `path`. A lock file named as above is read as that lock. A requirements file in
+      which every line carries a hash is audited exactly as written; any other requirements
+      file is resolved by pip-audit first.
+    required: false
+    default: ""
+  ignore-vulns:
+    description: >-
+      Vulnerability IDs to accept, separated by whitespace (PYSEC-…, GHSA-… or CVE-…: an ID or
+      any of its aliases). pip-audit runs with --ignore-vuln for each, so they neither count nor
+      fail the step; the job summary lists them. For a vulnerability that has no fixed version
+      yet, or that does not apply to how the package is used.
+    required: false
+    default: ""
+  python-version:
+    description: Python used to run pip-audit. Unpinned requirements are resolved for this version.
+    required: false
+    default: "3.12"
+  mode:
+    description: "'enforce' fails the step on findings; 'report' only annotates (phased rollout)."
+    required: false
+    default: enforce
+
+outputs:
+  issues:
+    description: Number of known vulnerabilities reported (accepted ones excluded).
+    value: ${{ steps.audit.outputs.issues }}
+  audited:
+    description: The dependency files that were audited (empty when none was found).
+    value: ${{ steps.audit.outputs.audited }}
+  vulnerabilities:
+    description: The IDs of the reported vulnerabilities, separated by spaces.
+    value: ${{ steps.audit.outputs.vulnerabilities }}
+
+runs:
+  using: composite
+  steps:
+    # $/ = this repository at the exact commit being run: no ref to keep in step.
+    # update-environment: false -> the caller job's PATH/python are left untouched.
+    - name: Set up Python for pip-audit
+      id: py
+      uses: $/.github/actions/common/install-python
+      with:
+        python-version: ${{ inputs.python-version }}
+        update-environment: "false"
+
+    # Private venv -> pip-audit's dependencies never clash with another scanner's or the project's.
+    # locked-requirements -> pip --require-hashes: only files hashed in requirements.txt install.
+    - name: Install the pinned pip-audit
+      id: venv
+      uses: $/.github/actions/common/install-dependencies
+      with:
+        python-path: ${{ steps.py.outputs.python-path }}
+        venv: org-security-scan-pip-audit
+        locked-requirements: ${{ github.action_path }}/requirements.txt
+
+    # Inputs go through env, never inline ${{ }} in the script (prevents script injection).
+    - name: Audit
+      id: audit
+      shell: bash
+      env:
+        AUDIT_PY: ${{ steps.venv.outputs.python }}
+        AUDIT_PATH: ${{ inputs.path }}
+        AUDIT_REQUIREMENTS: ${{ inputs.requirements }}
+        AUDIT_IGNORE_VULNS: ${{ inputs.ignore-vulns }}
+        AUDIT_MODE: ${{ inputs.mode }}
+      run: |
+        set -euo pipefail
+        "$AUDIT_PY" "$GITHUB_ACTION_PATH/audit.py" \
+          --path "$AUDIT_PATH" \
+          --requirements="$AUDIT_REQUIREMENTS" \
+          --ignore-vuln="$AUDIT_IGNORE_VULNS" \
+          --mode "$AUDIT_MODE"

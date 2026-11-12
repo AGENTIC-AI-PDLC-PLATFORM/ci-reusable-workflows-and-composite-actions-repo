@@ -1,0 +1,26 @@
+# Org Semgrep rule for Dockerfiles (not Python, so out of bandit's reach).
+# Versioned together with rule_scan.py and action.yml: a rule change ships in the same commit as
+# the code; repos pinned to a SHA move deliberately (ENFORCEMENT.md).
+# The rule has cases in tests/policy/semgrep/, listed in its expected.txt.
+rules:
+  - id: org.dockerfile.base-image-not-pinned
+    languages: [dockerfile]
+    severity: WARNING
+    message: >-
+      The base image has no tag or the tag latest, so each build pulls whatever was pushed last.
+      Pin a version tag or, better, a digest (image@sha256:...).
+    metadata:
+      category: security
+      cwe: "CWE-829: Inclusion of Functionality from Untrusted Control Sphere"
+    pattern-either:
+      - pattern: FROM $IMAGE:latest
+      - patterns:
+          - pattern: FROM $IMAGE
+          - pattern-not: FROM $IMAGE:$TAG
+          - pattern-not: FROM $IMAGE@$DIGEST
+          - pattern-not: FROM scratch
+          # Not an image: the name of an earlier build stage (FROM ... AS name).
+          - pattern-not-inside: |
+              FROM $BASE AS $IMAGE
+              ...
+              FROM $IMAGE

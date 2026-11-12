@@ -30,7 +30,10 @@
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
           { "context": "lint-policy" },
-          { "context": "self-lint / python-lint" }
+          { "context": "self-lint / python-lint" },
+          { "context": "security-policy" },
+          { "context": "self-scan / security-scan" },
+          { "context": "tooling-audit" }
         ]
       }
     }

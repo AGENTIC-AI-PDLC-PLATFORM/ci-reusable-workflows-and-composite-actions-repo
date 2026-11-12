@@ -1,0 +1,22 @@
+# file:line:rule, everything the org Semgrep rules (run-semgrep/rules/, with the semgrep pinned in
+# run-semgrep/requirements.in) report on the three fixtures, under the names they are scanned as:
+# data_flow.py.txt -> data_flow.py, workflow.yml.txt -> .github/workflows/workflow.yml,
+# Dockerfile.txt -> Dockerfile. A change that alters this list updates it in the same commit:
+# that diff is the rule change, as every consumer will see it.
+.github/workflows/workflow.yml:19:org.github-actions.action-not-pinned-to-sha
+.github/workflows/workflow.yml:21:org.github-actions.action-not-pinned-to-sha
+.github/workflows/workflow.yml:24:org.github-actions.action-not-pinned-to-sha
+.github/workflows/workflow.yml:28:org.github-actions.untrusted-expression-in-run
+.github/workflows/workflow.yml:31:org.github-actions.untrusted-expression-in-run
+.github/workflows/workflow.yml:48:org.github-actions.action-not-pinned-to-sha
+Dockerfile:5:org.dockerfile.base-image-not-pinned
+Dockerfile:6:org.dockerfile.base-image-not-pinned
+Dockerfile:11:org.dockerfile.base-image-not-pinned
+data_flow.py:27:org.python.tainted-command-execution
+data_flow.py:33:org.python.tainted-command-execution
+data_flow.py:41:org.python.tainted-sql-query
+data_flow.py:49:org.python.tainted-command-execution
+data_flow.py:55:org.python.tainted-command-execution
+data_flow.py:62:org.python.tainted-sql-query
+data_flow.py:69:org.python.tainted-command-execution
+data_flow.py:77:org.python.dangerous-deserialization-flag

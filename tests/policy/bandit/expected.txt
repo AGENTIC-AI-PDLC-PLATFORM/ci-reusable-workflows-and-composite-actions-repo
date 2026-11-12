@@ -1,0 +1,9 @@
+# line:test-id, everything bandit (the version pinned in run-bandit/requirements.in) reports on
+# insecure.py.txt at the org thresholds (severity medium, confidence medium). A change that alters
+# this list updates it in the same commit: that diff is the rule change, as every consumer will
+# see it.
+19:B602
+27:B506
+36:B614
+44:B615
+45:B615

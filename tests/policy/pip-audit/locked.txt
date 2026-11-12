@@ -1,0 +1,21 @@
+# What audit.py must read from each lock fixture of this folder: uv.lock.txt, poetry.lock.txt,
+# pdm.lock.txt and Pipfile.lock.txt, the lock files uv 0.13.7, Poetry 2.5.1, PDM 2.29.7 and
+# pipenv 2026.11.0 wrote for one and the same project. They are stored with a .txt suffix, like
+# vulnerable-pins.txt, so that nothing treats them as dependencies of this repository;
+# tests/test_security_policy.py audits them under their real names.
+#
+# The project: urllib3==1.24.1 (the deliberately old pin of vulnerable-pins.txt: expected.txt
+# lists what pip-audit must at least report on it), colorama==0.4.6 on Windows only,
+# iniconfig==2.0.0 in the dev group, sampleproject from git (it needs peppercorn), six from the
+# URL of a wheel, and localpkg from a local folder.
+#
+# name==version: locked from a package index, so audited as that pin, whatever its marker or
+# its group.
+# name alone: locked from somewhere else than a package index, so listed as not audited.
+# The project itself and localpkg are the repository's own code: neither.
+colorama==0.4.6
+iniconfig==2.0.0
+peppercorn==0.6
+sampleproject
+six
+urllib3==1.24.1

@@ -1,0 +1,26 @@
+# The checks this repository's CI runs on its own Python, before the commit exists:
+#   pip install pre-commit && pre-commit install
+# Same tools, same versions, same policy as CI. Each rev is the full commit SHA of the release
+# named in its "frozen:" comment, and tests/test_supply_chain.py fails when a release is not the
+# version CI pins (run-ruff/requirements.in, run-bandit/requirements.in), when a rev is not a
+# full SHA, or when the thresholds differ from security-scan.yml. A tool upgrade moves the pin,
+# the policy and the rev here in one pull request:
+#   pre-commit autoupdate --freeze --repo <the hook repository>
+# A hook can be skipped (git commit --no-verify); CI cannot. This is fast feedback, not the gate.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 25bcf95026b96e2dd3c0aec3090c3d6ef6ca2e6c  # frozen: v0.17.3
+    hooks:
+      # The org lint policy itself: the file run-ruff ships. --no-cache, as lint.py runs ruff in
+      # CI: the hook leaves no .ruff_cache folder in the repository.
+      - id: ruff-check
+        args: [--config, .github/actions/python-lint/run-ruff/ruff.toml, --no-cache]
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 92ae8b82fb422a639f0ed8d99e96cea769594e08  # frozen: 1.9.4
+    hooks:
+      # -ll -ii = severity and confidence medium or higher, the defaults of security-scan.yml.
+      # exclude = the folders run-bandit skips.
+      - id: bandit
+        args: [-ll, -ii]
+        exclude: (^|/)(\.venv|build|dist|migrations)/

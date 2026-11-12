@@ -1,0 +1,83 @@
+# Org Semgrep rules for Python. Versioned together with rule_scan.py and action.yml: a rule
+# change ships in the same commit as the code; repos pinned to a SHA move deliberately
+# (ENFORCEMENT.md).
+# These are the checks bandit cannot make. Bandit judges one call at a time; the two taint rules
+# below follow a value from where it enters the program to where it is used, and the third is an
+# organization decision written down as a rule.
+# Every rule has a case in tests/policy/semgrep/, listed in its expected.txt.
+rules:
+  - id: org.python.tainted-command-execution
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Untrusted input reaches a command or code execution call. Pass an argument list without
+      shell=True, or check the value against an allow-list first.
+    metadata:
+      category: security
+      cwe: "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+    pattern-sources: &untrusted-input
+      # What a user types or passes on the command line.
+      - pattern: input(...)
+      - pattern: sys.argv
+      # What an HTTP client sends (Flask).
+      - pattern: flask.request.$FIELD
+      # What a language model chose: the arguments of a function exposed to it as a tool
+      # (LangChain / LangGraph @tool, the OpenAI Agents SDK @function_tool, MCP @server.tool()).
+      - patterns:
+          - pattern-either:
+              - pattern-inside: |
+                  @tool
+                  def $FUNC(..., $ARG, ...):
+                      ...
+              - pattern-inside: |
+                  @tool(...)
+                  def $FUNC(..., $ARG, ...):
+                      ...
+              - pattern-inside: |
+                  @function_tool
+                  def $FUNC(..., $ARG, ...):
+                      ...
+              - pattern-inside: |
+                  @$SERVER.tool(...)
+                  def $FUNC(..., $ARG, ...):
+                      ...
+          - focus-metavariable: $ARG
+    pattern-sinks:
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+      - pattern: subprocess.$CALL(..., shell=True, ...)
+      - pattern: eval(...)
+      - pattern: exec(...)
+
+  - id: org.python.tainted-sql-query
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Untrusted input is built into the text of a SQL statement. Keep the statement constant and
+      pass the value as a query parameter: cursor.execute("... WHERE id = %s", (value,)).
+    metadata:
+      category: security
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+    pattern-sources: *untrusted-input
+    pattern-sinks:
+      # Only the statement text is the sink: values passed as parameters are safe.
+      - patterns:
+          - pattern-either:
+              - pattern: $CURSOR.execute($QUERY, ...)
+              - pattern: $CURSOR.executemany($QUERY, ...)
+              - pattern: $CURSOR.executescript($QUERY, ...)
+          - focus-metavariable: $QUERY
+
+  - id: org.python.dangerous-deserialization-flag
+    languages: [python]
+    severity: WARNING
+    message: >-
+      allow_dangerous_deserialization=True makes the loader unpickle the file, which runs any code
+      stored in it. Load only files this service wrote itself, or use a format that cannot carry
+      code.
+    metadata:
+      category: security
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+    pattern: $LOADER(..., allow_dangerous_deserialization=True, ...)

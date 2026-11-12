@@ -2,14 +2,18 @@ name: self-test
 
 # Proves the sentence at the top of ruff.toml and mypy.ini on every pull request, before the
 # commit exists on main where callers could pin it. $/ resolves to the commit under test, so the
-# policies, lint.py, typecheck.py, the action.yml files and the pins are always tested together,
+# policies, the rules, the scripts, the action.yml files and the pins are always tested together,
 # exactly as callers will run them.
-# Both jobs are required status checks on main
+# All five jobs are required status checks on main
 # (folder-for-administrating-this-repo/ruleset-main.json).
+# The weekly run is for what changes without a commit here: new advisories against the pinned
+# tools (tooling-audit) and findings a full scan shows that a pull request's baseline hides.
 
 on:
   pull_request:
   merge_group:
+  schedule:
+    - cron: "23 5 * * 1"
 
 permissions:
   contents: read
@@ -31,48 +35,59 @@ jobs:
         uses: $/.github/actions/common/install-python
 
       # The ruff and mypy the actions install (their requirements.txt) and the test tools.
+      # locked-requirements -> pip --require-hashes, exactly as the actions install them.
       - name: Install the pinned ruff, the pinned mypy and the test tools
         id: venv
         uses: $/.github/actions/common/install-dependencies
         with:
           python-path: ${{ steps.py.outputs.python-path }}
           venv: org-ci-self-test
-          requirements: |
+          locked-requirements: |
             .github/actions/python-lint/run-ruff/requirements.txt
             .github/actions/python-lint/run-mypy/requirements.txt
             tests/requirements.txt
 
-      # Pins match, findings match the expected lists, every uses: is this commit or a full SHA.
+      # Pins match, findings match the expected lists, every uses: is this commit or a full SHA,
+      # every lock is hashed and watched, the pre-commit hooks are the tools CI runs.
+      # tests/test_security_policy.py needs the scanners: the security-policy job runs it.
+      # ORG_CI_ONLINE: also check, against the hook repositories, that each pre-commit rev is
+      # the commit of the tag it names.
+      # -B: no __pycache__ is written into the checkout (pytest's rewritten tests, the scripts
+      # the tests import), as -p no:cacheprovider writes no .pytest_cache.
       - name: Policy tests
         shell: bash
         env:
           PYTHON_BIN: ${{ steps.venv.outputs.python }}
+          ORG_CI_ONLINE: "1"
         run: |
           set -euo pipefail
-          "$PYTHON_BIN" -m pytest -q -p no:cacheprovider tests
+          "$PYTHON_BIN" -B -m pytest -q -p no:cacheprovider tests --ignore tests/test_security_policy.py
 
       # The same fixtures through the real actions: staged at run time, so a fixture is never a
       # .py file of this repository for the org lint or type check to trip on.
+      # They are staged outside the checkout, under RUNNER_TEMP, which the runner empties at the
+      # start and at the end of every job: this job leaves the checkout as it found it, whatever
+      # runs in it next (tests/test_supply_chain.py fails if a fixture is staged in it again).
       - name: Stage the fixtures as Python files
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p policy-fixture/ruff policy-fixture/mypy
-          cp tests/policy/ruff/violations.py.txt policy-fixture/ruff/violations.py
-          cp tests/policy/mypy/type_errors.py.txt policy-fixture/mypy/type_errors.py
+          mkdir -p "$RUNNER_TEMP/policy-fixture/ruff" "$RUNNER_TEMP/policy-fixture/mypy"
+          cp tests/policy/ruff/violations.py.txt "$RUNNER_TEMP/policy-fixture/ruff/violations.py"
+          cp tests/policy/mypy/type_errors.py.txt "$RUNNER_TEMP/policy-fixture/mypy/type_errors.py"
 
       - name: Run the org lint action on its fixture
         id: ruff-fixture
         uses: $/.github/actions/python-lint/run-ruff
         with:
-          path: policy-fixture/ruff
+          path: ${{ runner.temp }}/policy-fixture/ruff
           mode: report
 
       - name: Run the org type-check action on its fixture
         id: mypy-fixture
         uses: $/.github/actions/python-lint/run-mypy
         with:
-          path: policy-fixture/mypy
+          path: ${{ runner.temp }}/policy-fixture/mypy
           mode: report
 
       - name: The actions report exactly the expected findings
@@ -90,7 +105,7 @@ jobs:
           [ "${RUFF_ISSUES:-}" = "${ruff_expected}" ] && [ "${MYPY_ISSUES:-}" = "${mypy_expected}" ]
 
       # mypy skips folders whose names start with a dot, so self-lint's type check (path ".")
-      # never reaches lint.py and typecheck.py under .github/. They are type-checked here, through
+      # never reaches the scripts under .github/. They are type-checked here, through
       # the real action, and any finding fails this required job. Ruff needs no such step:
       # self-lint's ruff already checks .github/.
       - name: Type-check this repository's scripts under .github
@@ -102,10 +117,229 @@ jobs:
 
   self-lint:
     # This repository's own Python under the policies it ships, through the real entry point: a
-    # rule change that breaks this code must fix it in the same PR. Ruff checks lint.py,
-    # typecheck.py and tests/. mypy skips folders whose names start with a dot, so here it checks
-    # tests/, and the last step of lint-policy type-checks the scripts under .github/.
+    # rule change that breaks this code must fix it in the same PR. Ruff checks the scripts
+    # under .github/ and tests/. mypy skips folders whose names start with a dot, so here it
+    # checks tests/, and the last step of lint-policy type-checks the scripts under .github/.
     name: self-lint
     uses: $/.github/workflows/python-lint.yml
     with:
       mypy-requirements: tests/requirements.txt
+
+  security-policy:
+    # The scanners callers get: each one in the venv its action uses, installed from its own
+    # lock, run on its fixture, and compared with the expected findings.
+    name: security-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out this repository
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python for the tests
+        id: py
+        uses: $/.github/actions/common/install-python
+
+      - name: Install the test tools
+        id: venv
+        uses: $/.github/actions/common/install-dependencies
+        with:
+          python-path: ${{ steps.py.outputs.python-path }}
+          venv: org-ci-self-test
+          locked-requirements: tests/requirements.txt
+
+      # One venv per scanner, under the name its action uses (the same name reuses the same
+      # venv): semgrep pins dependencies at versions the other tools do not share.
+      - name: Install the pinned bandit
+        id: bandit-venv
+        uses: $/.github/actions/common/install-dependencies
+        with:
+          python-path: ${{ steps.py.outputs.python-path }}
+          venv: org-security-scan-bandit
+          locked-requirements: .github/actions/security-scan/run-bandit/requirements.txt
+
+      - name: Install the pinned pip-audit
+        id: pip-audit-venv
+        uses: $/.github/actions/common/install-dependencies
+        with:
+          python-path: ${{ steps.py.outputs.python-path }}
+          venv: org-security-scan-pip-audit
+          locked-requirements: .github/actions/security-scan/run-pip-audit/requirements.txt
+
+      - name: Install the pinned semgrep
+        id: semgrep-venv
+        uses: $/.github/actions/common/install-dependencies
+        with:
+          python-path: ${{ steps.py.outputs.python-path }}
+          venv: org-security-scan-semgrep
+          locked-requirements: .github/actions/security-scan/run-semgrep/requirements.txt
+
+      # Findings match the expected lists, each scanner is its pin, a baseline hides what was
+      # already there, pip-audit finds its input by itself and honours accepted vulnerabilities.
+      # ORG_CI_ONLINE: the pip-audit tests query PyPI's advisory service.
+      # -B and -p no:cacheprovider: as in lint-policy, the run writes nothing into the checkout.
+      - name: Policy tests
+        shell: bash
+        env:
+          PYTHON_BIN: ${{ steps.venv.outputs.python }}
+          ORG_CI_BANDIT_PYTHON: ${{ steps.bandit-venv.outputs.python }}
+          ORG_CI_PIP_AUDIT_PYTHON: ${{ steps.pip-audit-venv.outputs.python }}
+          ORG_CI_SEMGREP_PYTHON: ${{ steps.semgrep-venv.outputs.python }}
+          ORG_CI_ONLINE: "1"
+        run: |
+          set -euo pipefail
+          "$PYTHON_BIN" -B -m pytest -q -p no:cacheprovider tests/test_security_policy.py
+
+      # The same fixtures through the real actions: staged at run time under the names they are
+      # scanned as, so a fixture is never code, a workflow or a requirements file of this
+      # repository. As in lint-policy, they are staged under RUNNER_TEMP, outside the checkout.
+      - name: Stage the fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          staged="$RUNNER_TEMP/policy-fixture"
+          mkdir -p "$staged/bandit" "$staged/semgrep/.github/workflows" "$staged/pip-audit"
+          cp tests/policy/bandit/insecure.py.txt "$staged/bandit/insecure.py"
+          cp tests/policy/semgrep/data_flow.py.txt "$staged/semgrep/data_flow.py"
+          cp tests/policy/semgrep/workflow.yml.txt "$staged/semgrep/.github/workflows/workflow.yml"
+          cp tests/policy/semgrep/Dockerfile.txt "$staged/semgrep/Dockerfile"
+          cp tests/policy/pip-audit/vulnerable-pins.txt "$staged/pip-audit/requirements.txt"
+
+      - name: Run the org bandit action on its fixture
+        id: bandit-fixture
+        uses: $/.github/actions/security-scan/run-bandit
+        with:
+          path: ${{ runner.temp }}/policy-fixture/bandit
+          mode: report
+
+      - name: Run the org semgrep action on its fixtures
+        id: semgrep-fixture
+        uses: $/.github/actions/security-scan/run-semgrep
+        with:
+          path: ${{ runner.temp }}/policy-fixture/semgrep
+          mode: report
+
+      # No requirements input: the action must find requirements.txt in the folder by itself.
+      - name: Run the org pip-audit action on its fixture
+        id: pip-audit-fixture
+        uses: $/.github/actions/security-scan/run-pip-audit
+        with:
+          path: ${{ runner.temp }}/policy-fixture/pip-audit
+          mode: report
+
+      # The same audit in enforce mode with every reported ID accepted: it must pass, with
+      # nothing left to report.
+      - name: Run it again with those vulnerabilities accepted
+        id: pip-audit-accepted
+        uses: $/.github/actions/security-scan/run-pip-audit
+        with:
+          path: ${{ runner.temp }}/policy-fixture/pip-audit
+          ignore-vulns: ${{ steps.pip-audit-fixture.outputs.vulnerabilities }}
+          mode: enforce
+
+      # bandit and semgrep: exactly the expected findings. pip-audit: at least the expected
+      # advisories (new ones keep being published), found without being told where to look,
+      # and none once they are accepted.
+      - name: The actions report the expected findings
+        shell: bash
+        env:
+          BANDIT_ISSUES: ${{ steps.bandit-fixture.outputs.issues }}
+          SEMGREP_ISSUES: ${{ steps.semgrep-fixture.outputs.issues }}
+          PIP_AUDIT_ISSUES: ${{ steps.pip-audit-fixture.outputs.issues }}
+          PIP_AUDIT_SOURCE: ${{ steps.pip-audit-fixture.outputs.audited }}
+          ACCEPTED_ISSUES: ${{ steps.pip-audit-accepted.outputs.issues }}
+        run: |
+          set -euo pipefail
+          expected() { sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$1" | wc -l | tr -d ' '; }
+          bandit_expected=$(expected tests/policy/bandit/expected.txt)
+          semgrep_expected=$(expected tests/policy/semgrep/expected.txt)
+          pip_audit_expected=$(expected tests/policy/pip-audit/expected.txt)
+          echo "bandit reported ${BANDIT_ISSUES:-nothing}; tests/policy/bandit/expected.txt lists ${bandit_expected}."
+          echo "semgrep reported ${SEMGREP_ISSUES:-nothing}; tests/policy/semgrep/expected.txt lists ${semgrep_expected}."
+          echo "pip-audit reported ${PIP_AUDIT_ISSUES:-nothing} in '${PIP_AUDIT_SOURCE}'; tests/policy/pip-audit/expected.txt lists at least ${pip_audit_expected}."
+          echo "pip-audit reported ${ACCEPTED_ISSUES:-nothing} once those were accepted."
+          # One test per line: under set -e each failing line stops the step.
+          [ "${BANDIT_ISSUES:-}" = "${bandit_expected}" ]
+          [ "${SEMGREP_ISSUES:-}" = "${semgrep_expected}" ]
+          [ "${PIP_AUDIT_ISSUES:-0}" -ge "${pip_audit_expected}" ]
+          # The file the action found by itself (shown relative to the checkout, so by its end).
+          [[ "${PIP_AUDIT_SOURCE}" == */policy-fixture/pip-audit/requirements.txt ]]
+          [ "${ACCEPTED_ISSUES:-}" = "0" ]
+
+  self-scan:
+    # This repository's own code under the scanners it ships, through the real entry point:
+    # the scripts, workflows and actions under .github/ (bandit, and semgrep with its GitHub
+    # Actions rules). On a pull request semgrep reports what the pull request adds; the weekly
+    # run scans everything. The lock files are audited by tooling-audit, which names what it
+    # accepts.
+    name: self-scan
+    uses: $/.github/workflows/security-scan.yml
+    with:
+      path: .github
+      pip-audit-mode: skip
+
+  tooling-audit:
+    # The tools this repository installs are dependencies too, of every repository that calls
+    # it. Every pin in every lock file is checked for known vulnerabilities, and the files of
+    # the pinned tools for their signatures. .github/dependabot.yml proposes the updates.
+    name: tooling-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out this repository
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Every lock file: the three lint-policy installs from, and the four of the scanners and
+      # the signature verifier (tests/test_supply_chain.py fails when one is missing here).
+      # They are complete locks, so each pin is audited as written and nothing is installed.
+      #
+      # ignore-vulns: accepted because semgrep 1.184.0 itself pins the affected versions
+      # (mcp==1.29.0, opentelemetry-api~=1.37.0), so no lock of ours can move them, and the
+      # affected code never runs in `semgrep scan`:
+      #   CVE-2026-59951, CVE-2026-116684, CVE-2026-116685, CVE-2026-116686
+      #     mcp: its HTTP server (session memory, bearer-token audience) and its HTTP client
+      #     (redirects, tool output schemas). rule_scan.py starts neither.
+      #   CVE-2026-114603
+      #     opentelemetry-api: parsing of an inbound `tracestate` request header. A command-line
+      #     scan receives no requests.
+      # Remove an ID as soon as a semgrep release raises the pin: the audit then guards it again.
+      - name: Audit this repository's own pinned tooling (pip-audit)
+        id: audit
+        uses: $/.github/actions/security-scan/run-pip-audit
+        with:
+          requirements: |
+            .github/actions/python-lint/run-ruff/requirements.txt
+            .github/actions/python-lint/run-mypy/requirements.txt
+            tests/requirements.txt
+            .github/actions/security-scan/run-bandit/requirements.txt
+            .github/actions/security-scan/run-pip-audit/requirements.txt
+            .github/actions/security-scan/run-semgrep/requirements.txt
+            .github/actions/supply-chain/verify-signatures/requirements.txt
+          ignore-vulns: |
+            CVE-2026-59951
+            CVE-2026-116684
+            CVE-2026-116685
+            CVE-2026-116686
+            CVE-2026-114603
+          mode: enforce
+
+      # Runs even when the audit failed, so one run shows both results.
+      # Hashes say the files cannot change; this says who built them (publishers.toml).
+      - name: Verify the signatures of the pinned tools
+        id: signatures
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        uses: $/.github/actions/supply-chain/verify-signatures
+        with:
+          requirements: |
+            .github/actions/python-lint/run-ruff/requirements.txt
+            .github/actions/python-lint/run-mypy/requirements.txt
+            tests/requirements.txt
+            .github/actions/security-scan/run-bandit/requirements.txt
+            .github/actions/security-scan/run-pip-audit/requirements.txt
+            .github/actions/security-scan/run-semgrep/requirements.txt
+            .github/actions/supply-chain/verify-signatures/requirements.txt

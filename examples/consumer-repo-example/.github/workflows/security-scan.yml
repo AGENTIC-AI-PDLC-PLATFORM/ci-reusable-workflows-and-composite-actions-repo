@@ -1,6 +1,12 @@
 name: security-scan
 
 # OPT-IN MODE: the only file a repository needs to scan its code and dependencies.
+# bandit and semgrep scan the code; pip-audit audits the dependencies it finds by itself
+# (pylock.toml, else uv.lock, poetry.lock, pdm.lock or Pipfile.lock, else requirements*.txt,
+# else pyproject.toml).
+# On a pull request semgrep reports only what the pull request adds; the weekly run scans all.
+# ENFORCED MODE: if the org ruleset runs required-security-scan.yml on this repository, it
+# already scans every pull request. Keep only the schedule here, for the weekly full scan.
 
 on:
   pull_request:
@@ -17,5 +23,14 @@ jobs:
     uses: AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo/.github/workflows/security-scan.yml@REPLACE_WITH_FULL_SHA_OF_MAIN
     with:
       path: src                        # optional, defaults to the whole repo
-      requirements: requirements.txt   # optional, enables the dependency audit
+      # requirements: requirements.txt # optional, audit these files instead of the ones found
+      # project-path: services/api     # optional, where pip-audit looks (default: the repo root)
       # mode: report                   # optional, annotate without failing (phased rollout)
+      # Each scanner can have its own mode (enforce, report or skip) while the others follow mode:
+      # bandit-mode: report
+      # semgrep-mode: report
+      # pip-audit-mode: report
+      # Accept a known vulnerability, for example one with no fixed version yet. pip-audit stops
+      # reporting it, the job summary keeps listing it, and bandit and semgrep still enforce:
+      # ignore-vulns: |
+      #   GHSA-xxxx-xxxx-xxxx
