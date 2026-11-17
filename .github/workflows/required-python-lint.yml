@@ -6,6 +6,9 @@ name: required-python-lint
 # Point the ruleset at a full commit SHA of main, not at main: changing that SHA is the deliberate
 # move, made once self-test has passed on that commit (ENFORCEMENT.md).
 # No inputs are passed, so every targeted repository runs the org policies exactly as shipped here.
+# This repository is excluded from that ruleset, and the job below is skipped here as well: its own
+# pull_request trigger would otherwise run this policy a second time on every pull request of this
+# repository, where self-test's self-lint job is the authority.
 
 on:
   pull_request:
@@ -16,6 +19,14 @@ permissions:
 
 jobs:
   lint:
+    # Skipped in this repository, which the org ruleset excludes (ENFORCEMENT.md). The exclusion
+    # only stops the ruleset from running this file on pull requests here; the file is still this
+    # repository's own, and its pull_request trigger starts it all the same, so without the guard
+    # python-lint.yml runs twice on every pull request and posts a second, nearly identical check
+    # that ruleset-main.json does not require. In a run the ruleset starts on a targeted
+    # repository the context is that repository, so the condition holds and the job runs there.
+    # tests/test_supply_chain.py pins this guard and the name it compares.
+    if: ${{ github.repository != 'AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo' }}
     uses: $/.github/workflows/python-lint.yml   # same commit as the ruleset ref
     # Phased rollout: annotations only first, then delete these lines to enforce.
     # Type checking can stay in report (or skip) while ruff is already enforced.

@@ -7,6 +7,9 @@ name: required-security-scan
 # move, made once self-test has passed on that commit (ENFORCEMENT.md).
 # No inputs are passed, so every targeted repository runs the org scan exactly as shipped here:
 # bandit and semgrep on the whole repository, pip-audit on the dependency files at its root.
+# This repository is excluded from that ruleset, and the job below is skipped here as well: its own
+# pull_request trigger would otherwise run this scan a second time on every pull request of this
+# repository, where self-test's self-scan job is the authority.
 # On these two events semgrep reports only what the pull request or the merge group adds.
 
 on:
@@ -18,6 +21,14 @@ permissions:
 
 jobs:
   security:
+    # Skipped in this repository, which the org ruleset excludes (ENFORCEMENT.md). The exclusion
+    # only stops the ruleset from running this file on pull requests here; the file is still this
+    # repository's own, and its pull_request trigger starts it all the same, so without the guard
+    # security-scan.yml runs twice on every pull request and posts a second, nearly identical
+    # check that ruleset-main.json does not require. In a run the ruleset starts on a targeted
+    # repository the context is that repository, so the condition holds and the job runs there.
+    # tests/test_supply_chain.py pins this guard and the name it compares.
+    if: ${{ github.repository != 'AGENTIC-AI-PDLC-PLATFORM/ci-reusable-workflows-and-composite-actions-repo' }}
     uses: $/.github/workflows/security-scan.yml   # same commit as the ruleset ref
     # Phased rollout: annotations only first, then delete these lines to enforce.
     # Each scanner can follow later. Bandit has no baseline: it reports every finding of a

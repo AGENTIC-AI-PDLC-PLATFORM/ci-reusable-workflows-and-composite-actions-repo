@@ -270,14 +270,17 @@ jobs:
 
   self-scan:
     # This repository's own code under the scanners it ships, through the real entry point:
-    # the scripts, workflows and actions under .github/ (bandit, and semgrep with its GitHub
-    # Actions rules). On a pull request semgrep reports what the pull request adds; the weekly
-    # run scans everything. The lock files are audited by tooling-audit, which names what it
-    # accepts.
+    # everything it holds, not only .github/ (bandit, and semgrep with its GitHub Actions and
+    # Python rules). tests/ is code this repository ships a policy for like any other, and
+    # nothing else scans it: bandit never skipped it, semgrep skips it by default, and
+    # .semgrepignore is what reaches it, holding the one exclusion in exchange -- the example
+    # folder, which is copied into a repository rather than run in this one. On a pull request
+    # semgrep reports what the pull request adds; the weekly run scans everything. The lock
+    # files are audited by tooling-audit, which names what it accepts.
     name: self-scan
     uses: $/.github/workflows/security-scan.yml
     with:
-      path: .github
+      path: "."
       pip-audit-mode: skip
 
   tooling-audit:

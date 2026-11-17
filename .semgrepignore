@@ -1,0 +1,14 @@
+# Semgrep's own default ignores are replaced by this file (rule_scan.py), which is how
+# self-scan reaches tests/: semgrep skips tests/ by default, bandit does not, and this
+# repository's tests are code it ships the policy for like any other.
+# Not the same list as ruff.toml or run-bandit: those exclusions reach them through
+# --exclude, which rule_scan.py passes on every run whatever this file says.
+.git/
+
+# Templates, not workflows. examples/consumer-repo-example/ is copied into a repository and
+# its @REPLACE_WITH_FULL_SHA_OF_MAIN placeholders are replaced there (README, step 6), so
+# org.github-actions.action-not-pinned-to-sha reports every one of them here, where they are
+# text in a folder nothing runs. The rule still guards the real thing: the copy that lands in
+# a targeted repository's .github/workflows/ is scanned there, and nothing in this folder is
+# exempted anywhere but in this repository.
+examples/consumer-repo-example/

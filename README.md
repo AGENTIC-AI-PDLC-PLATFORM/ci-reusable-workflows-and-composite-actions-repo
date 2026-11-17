@@ -245,6 +245,13 @@ GitHub-hosted runners qualify. Update self-hosted runners first: older runners r
 `required-python-lint.yml` calls `python-lint.yml` with no inputs, so every targeted repo runs the org
 policies exactly as shipped. Moving the ruleset to a newer SHA is the deliberate step.
 
+Both `required-*.yml` guard their job with `if: ${{ github.repository != '<org>/<this repo>' }}`. The
+rulesets exclude this repository (ENFORCEMENT.md), but the files are its own and their `pull_request`
+trigger starts them here all the same: unguarded, every pull request would lint and scan twice, once
+from `self-test` and once from the file enforced mode ships, and the second run would post a
+`lint / python-lint` check next to the required `self-lint / python-lint`. A skipped job costs no runner
+time, and `tests/test_supply_chain.py` fails if a guard is dropped or left behind by a rename.
+
 Phased rollout: call with `mode: report` first (annotations only), then switch to `enforce`.
 Type checking can follow later: `mypy-mode: report` (or `skip`) while ruff is already enforced.
 `required-python-lint.yml` carries both lines, commented out.

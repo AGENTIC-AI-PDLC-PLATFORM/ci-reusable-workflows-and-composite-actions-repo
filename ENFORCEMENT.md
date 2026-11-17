@@ -14,7 +14,7 @@ ruff.toml and mypy.ini open with the same sentence:
 | … and every file pip installs for them | Each `requirements.txt` is a complete lock generated from its `requirements.in` (every package, its sha256 hashes), installed with `pip --require-hashes` | pip refuses an unpinned or unhashed line, and any download whose sha256 is not in the file. `test_every_tool_lock_is_complete_and_hashed` and `test_every_tool_is_installed_with_require_hashes` fail when a lock is incomplete, differs from its pin, or is installed any other way |
 | … and every third-party action underneath | Full 40-character commit SHAs | The same `uses:` test fails on any tag or branch ref |
 | A rule change ships in the same commit as the code | `main` takes only squash merges of PRs approved by code owners, whose `lint-policy` and `self-lint` checks passed on an up-to-date branch | `test_ruff_findings_match_expected` and `test_mypy_findings_match_expected` fail when findings change without `tests/policy/<tool>/expected.txt`. `self-lint` fails when this repo's own code breaks a new rule. The fixture steps fail when an action stops reporting what its policy finds |
-| … for the security scans as for lint | The `security-policy` and `self-scan` checks, required like the two above | `test_bandit_findings_match_expected` and `test_semgrep_findings_match_expected` fail when findings change without `tests/policy/<tool>/expected.txt`. `test_every_semgrep_rule_has_a_case_in_the_fixtures` fails for a rule no fixture exercises. `self-scan` fails when this repo's own scripts, workflows or actions break a rule. The fixture steps fail when an action stops reporting what its scanner finds |
+| … for the security scans as for lint | The `security-policy` and `self-scan` checks, required like the two above | `test_bandit_findings_match_expected` and `test_semgrep_findings_match_expected` fail when findings change without `tests/policy/<tool>/expected.txt`. `test_every_semgrep_rule_has_a_case_in_the_fixtures` fails for a rule no fixture exercises. `self-scan` fails when any code this repo holds breaks a rule -- `path: "."`, so `tests/` is covered too, which semgrep skips by default and `.semgrepignore` is what reaches; that file's one exclusion is `examples/consumer-repo-example/`, placeholder refs in a folder nothing runs. `test_no_dependency_file_is_audited_by_nothing` fails for a dependency file neither `tooling-audit` nor a `project-path` step audits, since `self-scan` passes `pip-audit-mode: skip` and enforced mode is guarded off here. The fixture steps fail when an action stops reporting what its scanner finds |
 | Repos pinned to a SHA move deliberately | Opt-in repos pin a full SHA and Dependabot proposes each move as a PR that runs the new policy. Enforced mode pins the org ruleset to a SHA | See [What is still not enforced](#what-is-still-not-enforced) |
 | Enforced mode runs the policies as shipped | `required-python-lint.yml` and `required-security-scan.yml` call the reusable workflow of their own commit and pass nothing that replaces a policy | `test_required_workflows_run_the_org_policy_as_shipped` fails when one passes anything but the modes of a phased rollout, runs on another event, or accepts a vulnerability without a reason in a comment |
 
@@ -235,7 +235,16 @@ repositories. Set `TARGETS` to the repositories to enforce, or `["~ALL"]`. Their
 fit this repository's: an internal repository serves internal and private repositories, a
 private one private repositories only, and public targets need a public one. This repository is
 excluded: `self-test` already lints and scans each of its pull requests at that pull request's
-commit, and a faulty pinned policy must never block the pull request that fixes it.
+commit, and a faulty pinned policy must never block the pull request that fixes it. The
+exclusion stops the ruleset from running the two files here; it does not stop the files
+themselves, which are this repository's own, in its `.github/workflows/`, with a `pull_request`
+trigger. So each one's single job is guarded on `github.repository` and skipped here, at no
+runner cost: `self-test` stays the authority on this repository's pull requests, and nothing
+posts a second `python-lint` or `security-scan` check beside the five
+`folder-for-administrating-this-repo/ruleset-main.json` requires. In a run the ruleset starts on
+a targeted repository the context is that repository, so the guard holds and the job runs there.
+`test_required_workflows_run_the_org_policy_as_shipped` fails when a guard is missing, and reads
+the name from the consumer example, so renaming this repository moves the guards with it.
 `do_not_enforce_on_create` keeps the rule from blocking the creation of repositories and
 branches.
 

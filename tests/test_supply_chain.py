@@ -66,8 +66,12 @@ def _normalise(name: str) -> str:
 
 
 def _pin_files() -> list[Path]:
-    """Every requirements.in: one per tool, next to the action (or the tests) that uses it."""
-    found = sorted([*ACTIONS.rglob("requirements.in"), ROOT / "tests" / "requirements.in"])
+    """Every requirements.in: one per tool, next to the action (or the tests) that uses it.
+    Found anywhere in the repository, so a lock added outside .github/actions/ is audited,
+    signature-checked and watched by Dependabot with the rest, and not quietly left out."""
+    found = sorted(
+        path for path in ROOT.rglob("requirements.in") if not _rel(path).startswith(".git/")
+    )
     assert len(found) >= 7, f"expected the requirements.in of every tool, found {found}"
     return found
 
@@ -280,6 +284,51 @@ def test_tooling_audit_covers_every_lock() -> None:
         assert text.count(accepted) >= 2, f"{accepted} is accepted without a reason in the comment"
 
 
+# Every file run-pip-audit can read (audit.py), which is every way a dependency of this
+# repository can arrive. A requirements.in has no entry: its requirements.txt is the lock.
+DEPENDENCY_FILES = (
+    "requirements*.txt",
+    "pyproject.toml",
+    "pylock.toml",
+    "uv.lock",
+    "poetry.lock",
+    "pdm.lock",
+    "Pipfile.lock",
+)
+
+
+def test_no_dependency_file_is_audited_by_nothing() -> None:
+    """tooling-audit names the locks of the pinned tools, self-scan passes pip-audit-mode: skip,
+    and the required-security-scan of enforced mode is guarded off in this repository, so a
+    dependency file none of them reaches is audited by nothing and no other test here notices.
+    A new one fails this until it is audited on purpose."""
+    audited: set[str] = set()
+    projects: set[str] = set()
+    for step in _steps(_yaml(SELF_TEST)):
+        if "run-pip-audit" not in str(step.get("uses") or ""):
+            continue
+        inputs = step.get("with") or {}
+        audited |= set(_lines(inputs.get("requirements")))
+        if inputs.get("project-path"):
+            projects.add(str(inputs["project-path"]).strip())
+    found = {
+        _rel(path)
+        for pattern in DEPENDENCY_FILES
+        for path in ROOT.rglob(pattern)
+        if not _rel(path).startswith(".git/")
+    }
+    missing = sorted(
+        dependency
+        for dependency in found
+        if dependency not in audited and Path(dependency).parent.as_posix() not in projects
+    )
+    assert not missing, (
+        f"audited by nothing: {missing}. Name a requirements file in tooling-audit's "
+        "run-pip-audit step, or audit a project file on purpose with project-path, and decide "
+        "whether the vulnerabilities accepted in the comment above that list apply to it too"
+    )
+
+
 def test_dependabot_watches_every_lock_and_action() -> None:
     """Dependabot proposes the update of every pin: each lock's folder (uv, which regenerates
     the hashes), and each folder holding a third-party action reference."""
@@ -377,11 +426,22 @@ REQUIRED_WORKFLOWS = {
 }
 
 
+def _home_repository() -> str:
+    """OWNER/REPO of this repository, read from the consumer example: the one copy of the full
+    name that has to be right anyway, because targeted repositories copy that line to call it."""
+    example = ROOT / "examples" / "consumer-repo-example" / ".github" / "workflows" / "lint.yml"
+    (job,) = _yaml(example)["jobs"].values()
+    owner, repo, *_ = job["uses"].split("/")
+    return f"{owner}/{repo}"
+
+
 def test_required_workflows_run_the_org_policy_as_shipped() -> None:
     """Targeted repositories cannot change what enforced mode runs, so the file itself must not
     either: the reusable workflow of this same commit, on pull requests and merge groups, with
     read-only permissions, and only rollout inputs. A vulnerability accepted for every targeted
-    repository needs its reason in a comment, like the ones tooling-audit accepts."""
+    repository needs its reason in a comment, like the ones tooling-audit accepts. And its one
+    job is guarded on github.repository: the org ruleset excludes this repository, so enforced
+    mode must not run the policy a second time on this repository's own pull requests."""
     for name, (entry_point, rollout) in REQUIRED_WORKFLOWS.items():
         path = WORKFLOWS / name
         workflow = _yaml(path)
@@ -398,6 +458,19 @@ def test_required_workflows_run_the_org_policy_as_shipped() -> None:
         (job,) = workflow["jobs"].values()
         assert job.get("uses") == f"$/.github/workflows/{entry_point}", (
             f"{name} must call {entry_point} of this same commit ($/), found {job.get('uses')!r}"
+        )
+        # The exclusion in ENFORCEMENT.md only stops the ruleset from running this file here.
+        # The file is still this repository's own, and its pull_request trigger starts it all
+        # the same: without the guard the policy runs a second time on every pull request of
+        # this repository, beside self-test's job, and posts a check ruleset-main.json does not
+        # require. A rename that updates the consumer example must update the guard with it.
+        home = _home_repository()
+        guard = job.get("if") or ""
+        assert f"github.repository != '{home}'" in guard, (
+            f"{name}: its one job must carry if: ${{{{ github.repository != '{home}' }}}}, so "
+            f"{entry_point} runs once on a pull request of this repository (self-test is the "
+            f"authority there) and still runs on every targeted repository, where the context "
+            f"is that repository. Found: {guard or 'no if:'}"
         )
         passed = job.get("with") or {}
         assert set(passed) <= rollout, (
