@@ -16,7 +16,8 @@ ci-reusable-workflows-and-composite-actions-repo/   → push as AGENTIC-AI-PDLC-
 │           ├── dependabot.yml        moves the opt-in repo's SHA pin, and its Python dependencies, in reviewed pull requests
 │           └── workflows/            lint.yml · test.yml · security-scan.yml (opt-in mode)
 ├── folder-for-administrating-this-repo/
-│   └── ruleset-main.json         ruleset for this repository's main: squash only, required checks
+│   ├── ruleset-main.json         ruleset for this repository's main: squash only, required checks
+│   └── set-org-rulesets.sh       the org rulesets of enforced mode: creates them, or moves their SHA
 ├── tests/                        policy tests, fixtures and their expected findings (self-test.yml)
 │   ├── requirements.in           pinned test tools
 │   └── requirements.txt          their hash lock, generated
@@ -240,7 +241,7 @@ GitHub-hosted runners qualify. Update self-hosted runners first: older runners r
 | Mode | What you do | Result |
 |---|---|---|
 | Opt-in | Each repo adds the files it wants from `examples/consumer-repo-example/.github/workflows/` | Status checks `lint / python-lint`, `test / python-test`, `security / security-scan`; make them required per repo if needed |
-| Enforced | An org ruleset: *Require workflows to pass before merging* → this repository @ a full commit SHA of `main` → `.github/workflows/required-python-lint.yml`; a second ruleset does the same with `required-security-scan.yml` | Runs on PRs of every targeted repo, no file in them, cannot be removed by repo admins. A failed run stops the merge |
+| Enforced | An org ruleset: *Require workflows to pass before merging* → this repository @ a full commit SHA of `main` → `.github/workflows/required-python-lint.yml`; a second ruleset does the same with `required-security-scan.yml` (`folder-for-administrating-this-repo/set-org-rulesets.sh` sets up both) | Runs on PRs of every targeted repo, no file in them, cannot be removed by repo admins. A failed run stops the merge |
 
 `required-python-lint.yml` calls `python-lint.yml` with no inputs, so every targeted repo runs the org
 policies exactly as shipped. Moving the ruleset to a newer SHA is the deliberate step.

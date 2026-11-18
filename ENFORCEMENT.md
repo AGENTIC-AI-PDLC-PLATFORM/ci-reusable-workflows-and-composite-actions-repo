@@ -185,7 +185,8 @@ they stay open until semgrep raises the pins.
    entry has a `sha` field beside `ref`), not `main`. `$/` in that file resolves against this
    repository at that SHA. Changing the SHA is the deliberate move, done once `self-test` passed.
    `required-security-scan.yml` is enforced the same way, by a ruleset of its own.
-   The commands: [Org ruleset (enforced mode)](#org-ruleset-enforced-mode).
+   `folder-for-administrating-this-repo/set-org-rulesets.sh` sets up both:
+   [Org ruleset (enforced mode)](#org-ruleset-enforced-mode).
 
 6. **Optional hardening**: the setting *Require actions to be pinned to a full-length commit SHA*
    (Settings, Actions, General) makes GitHub refuse any unpinned action at run time. It applies to
@@ -227,13 +228,14 @@ again when the org CI pin moves to a commit that changed the tools or the lint p
 
 ## Org ruleset (enforced mode)
 
-The commands for step 5, run with `gh` signed in as an organization owner. Each required
-workflow has its own ruleset, named after it: `required-python-lint` and
-`required-security-scan`. Set `WORKFLOW` to the one to create or to move, and run the block
-once for each: the two are independent, so the scan can start later than lint, or on other
-repositories. Set `TARGETS` to the repositories to enforce, or `["~ALL"]`. Their visibility must
-fit this repository's: an internal repository serves internal and private repositories, a
-private one private repositories only, and public targets need a public one. This repository is
+Step 5 is one script, `folder-for-administrating-this-repo/set-org-rulesets.sh`, run with `gh`
+signed in as an organization owner. Each required workflow has its own ruleset, named after it:
+`required-python-lint` and `required-security-scan`. With no argument the script sets up both;
+name one to create or move only that one: the two are independent, so the scan can start later
+than lint, or on other repositories. `TARGETS` sets the repositories to enforce, `["~ALL"]` by
+default. Their visibility must fit this repository's: an internal repository serves internal and
+private repositories, a private one private repositories only, and public targets need a public
+one. This repository is
 excluded: `self-test` already lints and scans each of its pull requests at that pull request's
 commit, and a faulty pinned policy must never block the pull request that fixes it. The
 exclusion stops the ruleset from running the two files here; it does not stop the files
@@ -273,82 +275,39 @@ points are its own:
   keeps that file removes its `pull_request` and `merge_group` triggers, or every pull request
   is scanned twice.
 
-One block does both: it creates the ruleset when none named after the workflow exists, and
-moves its SHA when one does, so the deliberate move is running the block again. It sends nothing
-unless the lookups worked, `WORKFLOW` is one of the two names and `TARGETS` is valid JSON. A
-failed `gh api` lookup prints GitHub's error JSON on stdout, so the block requires a numeric
-repository ID, a 40-character SHA and a ruleset ID that is a number or empty (no ruleset yet),
-and otherwise prints `NOT SENT` with the values it saw.
+The script is idempotent. For each ruleset it creates it when none named after the workflow
+exists, replaces its content when one does (which moves its SHA, to the head of `main` unless
+`SHA` names an older commit of `main`, and puts back anything changed by hand), and sends nothing
+when GitHub already holds exactly what it would send: the deliberate move is running it again.
+Every check runs before the first write.
+When one fails, nothing is sent and the script prints `NOT SENT` with what it saw: a `gh api`
+call that failed, a repository ID that is not a number, a SHA that is not a full SHA of a commit
+of `main`, an entry point missing at that SHA, two rulesets with the same name, this
+repository's workflows not shared with the organization (README, *Setup*, step 3), or targeted
+repositories whose visibility this repository cannot serve, listed with the `EXTRA_EXCLUDES`
+that leaves them out. `TARGETS` and `EXTRA_EXCLUDES` are part of what every run sends: a run
+without them sets `["~ALL"]` and excludes this repository alone again, and prints the change.
 
-The block needs `jq`. Install it once, on its own: pasted together with the block, sudo's password
-prompt or apt's question would read the next pasted lines as their answers.
-
-```bash
-sudo apt update && sudo apt install -y jq    # Ubuntu or WSL; on macOS: brew install jq
-```
-
-```bash
-export ORG=AGENTIC-AI-PDLC-PLATFORM
-export CI=ci-reusable-workflows-and-composite-actions-repo
-# The required workflow, which is also the name of its ruleset. One run of the block per value.
-export WORKFLOW=required-python-lint      # or: required-security-scan
-
-ID=$(gh api --paginate orgs/$ORG/rulesets --jq ".[] | select(.name == \"$WORKFLOW\") | .id")
-CI_ID=$(gh api repos/$ORG/$CI --jq .id)
-SHA=$(gh api repos/$ORG/$CI/commits/main --jq .sha)
-
-# A list targets only the repositories it names; '["~ALL"]' targets every repository, future ones
-# included. "exclude" always wins over "include". If this CI repository is private or internal,
-# public repositories can't use its workflows: exclude them next to $ci in the jq body below
-# (exclude: [$ci, "public-repo"]), or their pull requests would wait for a workflow that can't run.
-# For a move, keep TARGETS as it was: the PUT replaces the ruleset's conditions too.
-# TARGETS='["repo-a", "repo-b"]'
-TARGETS='["~ALL"]'
-
-if [[ $WORKFLOW =~ ^required-(python-lint|security-scan)$ && $CI_ID =~ ^[0-9]+$ && $SHA =~ ^[0-9a-f]{40}$ ]] && BODY=$(jq -n \
-  --argjson targets "$TARGETS" \
-  --arg ci "$CI" \
-  --argjson ci_id "$CI_ID" \
-  --arg sha "$SHA" \
-  --arg workflow "$WORKFLOW" \
-  '{
-    name: $workflow,
-    target: "branch",
-    enforcement: "active",
-    bypass_actors: [],
-    conditions: {
-      ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] },
-      repository_name: { include: $targets, exclude: [$ci] }
-    },
-    rules: [{
-      type: "workflows",
-      parameters: {
-        do_not_enforce_on_create: true,
-        workflows: [{ repository_id: $ci_id, path: (".github/workflows/" + $workflow + ".yml"), sha: $sha }]
-      }
-    }]
-  }'); then
-  if [[ -z $ID ]]; then                  # no ruleset with that name yet: create it
-    gh api --method POST "orgs/$ORG/rulesets" --input - <<<"$BODY"
-  elif [[ $ID =~ ^[0-9]+$ ]]; then       # it exists: move its SHA
-    gh api --method PUT "orgs/$ORG/rulesets/$ID" --input - <<<"$BODY"
-  else
-    echo "NOT SENT: check ID='$ID'" >&2
-  fi
-else
-  echo "NOT SENT: check WORKFLOW='$WORKFLOW' CI_ID='$CI_ID' SHA='$SHA' TARGETS='$TARGETS'" >&2
-fi
-```
-
-After each run, check what GitHub stored: the workflow entry must show your SHA. Then open a pull
-request in one targeted repository: a run named after the workflow (`required-python-lint`,
-`required-security-scan`) must appear in its checks. Pull requests that were already open run it
-only after a new commit, a branch update, or a close and reopen.
+It calls the GitHub API only and reads nothing from a clone, so it runs from any directory. It
+needs `gh`, whose token needs the `admin:org` scope
+(`gh auth refresh -h github.com -s admin:org`), and `jq`, which it installs with apt when it is
+missing (on macOS: `brew install jq`).
 
 ```bash
-ID=$(gh api --paginate orgs/$ORG/rulesets --jq ".[] | select(.name == \"$WORKFLOW\") | .id")
-gh api orgs/$ORG/rulesets/$ID --jq '.rules[] | select(.type == "workflows") | .parameters.workflows'
+S=folder-for-administrating-this-repo/set-org-rulesets.sh   # from the root of this repository
+DRY_RUN=1 $S        # every check, and what it would send; no write
+$S                  # both rulesets, at the head of main
+# Variants, one at a time:
+# $S required-security-scan                       one ruleset only
+# TARGETS='["repo-a", "repo-b"]' $S               these repositories instead of all of them
+# EXTRA_EXCLUDES='["public-repo"]' $S             excluded beside this repository
+# SHA=<full SHA of an older commit of main> $S    move back to that commit
 ```
+
+After each write the script reads the ruleset back and fails unless it holds the SHA it sent.
+Then open a pull request in one targeted repository: a run named after the workflow
+(`required-python-lint`, `required-security-scan`) must appear in its checks. Pull requests that
+were already open run it only after a new commit, a branch update, or a close and reopen.
 
 ## What is still not enforced
 
