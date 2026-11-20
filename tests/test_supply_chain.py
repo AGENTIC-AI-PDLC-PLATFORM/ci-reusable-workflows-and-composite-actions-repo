@@ -249,6 +249,54 @@ def test_inputs_reach_run_scripts_through_env() -> None:
     assert not problems, "\n".join(problems)
 
 
+# --- the checkout under check cannot replace a tool ----------------------------------------
+
+SAFE_PATH = 'SAFE_PATH = ["-P"] if sys.version_info >= (3, 11) else ["-I"]'
+TOOL_CALL = re.compile(r'sys\.executable,\s*(?P<safe>\*SAFE_PATH,\s*)?"-m",\s*"(?P<module>[\w.]+)"')
+MODULE_RUN = re.compile(
+    r'(?:"\$\w+"|\$\w+|\bpython[\d.]*)(?P<flags>(?:\s+-\w+)*)\s+-m\s+(?P<module>[\w.]+)'
+)
+
+
+def test_no_tool_runs_with_the_checkout_on_its_import_path() -> None:
+    """The actions run in the caller's checkout, and `python -m` puts the working directory
+    first on the import path: a ruff.py, mypy.py, bandit.py, pip_audit.py, venv.py or pip.py
+    committed there would run instead of the real module, and a pull request could switch the
+    org checks off from its own diff. The scripts start every tool with SAFE_PATH (-P, or -I
+    before Python 3.11); install-dependencies creates the venvs and runs pip with -I."""
+    problems = []
+    started = set()
+    for script in sorted(ACTIONS.glob("**/*.py")):
+        text = script.read_text()
+        calls = list(TOOL_CALL.finditer(text))
+        for call in calls:
+            started.add(call["module"])
+            if not call["safe"]:
+                lineno = text.count("\n", 0, call.start()) + 1
+                problems.append(f'{_rel(script)}:{lineno}: `-m {call["module"]}` without *SAFE_PATH')
+        if calls and SAFE_PATH not in text:
+            problems.append(f"{_rel(script)}: define `{SAFE_PATH}`")
+    for path in sorted(ACTIONS.glob("**/action.y*ml")):
+        for step in _steps(_yaml(path)):
+            for line in _lines(step.get("run")):
+                if line.startswith("#"):
+                    continue
+                for run in MODULE_RUN.finditer(line):
+                    started.add(run["module"])
+                    if "-I" not in run["flags"].split():
+                        problems.append(
+                            f"{_rel(path)}: step {step.get('name')!r} runs "
+                            f"`-m {run['module']}` without -I"
+                        )
+    audit = ACTIONS / "security-scan" / "run-pip-audit" / "audit.py"
+    if '"PYTHONSAFEPATH": "1"' not in audit.read_text():
+        problems.append(f"{_rel(audit)}: pip-audit starts `python -m pip` itself: pass it "
+                        "PYTHONSAFEPATH=1, which -P does not reach")
+    assert not problems, "\n".join(problems)
+    missing = {"ruff", "mypy", "bandit", "pip_audit", "venv", "pip"} - started
+    assert not missing, f"no longer found how these are started, update this test: {missing}"
+
+
 # --- every pin is audited, signature-checked and watched -----------------------------------
 
 

@@ -51,9 +51,13 @@ runs:
       run: |
         set -euo pipefail
         venv="$RUNNER_TEMP/$VENV_NAME"
-        "$PYTHON_BIN" -m venv "$venv"
+        # -I: this step runs in the caller's checkout, and `python -m` would import a venv.py or
+        # pip.py committed there instead of the real module, before any check has run. Isolated
+        # mode keeps the working directory off the import path (it also ignores PYTHON*
+        # variables and the user site, which neither command needs), on every Python version.
+        "$PYTHON_BIN" -I -m venv "$venv"
         if [ "$RUNNER_OS" = "Windows" ]; then py="$venv/Scripts/python.exe"; else py="$venv/bin/python"; fi
-        pip=("$py" -m pip install --quiet --disable-pip-version-check)
+        pip=("$py" -I -m pip install --quiet --disable-pip-version-check)
         while IFS=$' \t' read -r req; do
           [ -n "$req" ] || continue
           "${pip[@]}" -r "$req"

@@ -47,6 +47,10 @@ from pathlib import Path
 from typing import Any
 
 SUMMARY_MAX_ROWS = 200
+# `python -m` puts the working directory, the checkout being audited, first on the import path:
+# a pip_audit.py committed there would run instead of pip-audit. -P (Python 3.11+) leaves it off
+# the path, as -I does on older Pythons.
+SAFE_PATH = ["-P"] if sys.version_info >= (3, 11) else ["-I"]
 NAME = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 VERSION = r"[A-Za-z0-9][A-Za-z0-9._+!-]*"
 PIN = re.compile(rf"^(?P<name>{NAME})\s*(?:\[[^\]]*\])?\s*==\s*(?P<version>[^\s;\\]+)")
@@ -444,11 +448,16 @@ def run_pip_audit(
     Raises AuditError unless pip-audit produced a report."""
     report_file = workdir / "report.json"
     report_file.unlink(missing_ok=True)
-    cmd = [sys.executable, "-m", "pip_audit", "--progress-spinner", "off", "--desc", "off"]
+    cmd = [sys.executable, *SAFE_PATH, "-m", "pip_audit", "--progress-spinner", "off"]
+    cmd += ["--desc", "off"]
     cmd += ["-f", "json", "-o", str(report_file)]
     for vuln_id in ignore:
         cmd += ["--ignore-vuln", vuln_id]
-    proc = subprocess.run(cmd + run, capture_output=True, text=True, check=False)
+    # pip-audit starts interpreters of its own in the same checkout (`python -m pip`, which
+    # resolves requirements in a temporary venv), and -P does not reach them: PYTHONSAFEPATH
+    # does, on the Python 3.11+ the scanners need.
+    env = {**os.environ, "PYTHONSAFEPATH": "1"}
+    proc = subprocess.run(cmd + run, capture_output=True, text=True, check=False, env=env)
     log = (proc.stdout + proc.stderr).strip()
 
     dependencies: list[dict[str, object]] | None = None

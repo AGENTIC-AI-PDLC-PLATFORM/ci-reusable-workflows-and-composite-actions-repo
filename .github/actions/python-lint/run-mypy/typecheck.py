@@ -23,6 +23,10 @@ from pathlib import Path
 
 SUMMARY_MAX_ROWS = 200
 NO_FILES_MESSAGE = "There are no .py[i] files"
+# `python -m` puts the working directory, the checkout being checked, first on the import path:
+# a mypy.py committed there would run instead of mypy. -P (Python 3.11+) leaves it off the path,
+# as -I does on older Pythons.
+SAFE_PATH = ["-P"] if sys.version_info >= (3, 11) else ["-I"]
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,7 @@ class Finding:
 def run_checks(target: str, config: str) -> list[Finding]:
     """Run mypy with the given config and normalise its JSON output (one object per line)."""
     with tempfile.TemporaryDirectory(prefix="org-mypy-cache-") as cache_dir:
-        cmd = [sys.executable, "-m", "mypy", target, "--config-file", config]
+        cmd = [sys.executable, *SAFE_PATH, "-m", "mypy", target, "--config-file", config]
         cmd += ["--output", "json", "--no-error-summary"]
         cmd += ["--cache-dir", cache_dir]  # throwaway cache: nothing is written into the checkout
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)

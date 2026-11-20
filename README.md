@@ -246,6 +246,12 @@ GitHub-hosted runners qualify. Update self-hosted runners first: older runners r
 `required-python-lint.yml` calls `python-lint.yml` with no inputs, so every targeted repo runs the org
 policies exactly as shipped. Moving the ruleset to a newer SHA is the deliberate step.
 
+In both modes the code checks skip the same folders: ruff, mypy, bandit and semgrep never read a
+folder named `.venv`, `build`, `dist` or `migrations`, at any depth (`ruff.toml`, `mypy.ini`,
+`run-bandit/scan.py`, `run-semgrep/rule_scan.py`; ruff also skips its own defaults, such as `venv`
+and `node_modules`). Code that a repository keeps in such a folder gets no org check. Rename the
+folder, or keep in it only files these tools do not read (no Python, workflow, action or Dockerfile).
+
 Both `required-*.yml` guard their job with `if: ${{ github.repository != '<org>/<this repo>' }}`. The
 rulesets exclude this repository (ENFORCEMENT.md), but the files are its own and their `pull_request`
 trigger starts them here all the same: unguarded, every pull request would lint and scan twice, once

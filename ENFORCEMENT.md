@@ -56,6 +56,7 @@ scanners ask of anyone's dependencies.
 | No pinned tool has a known vulnerability | `tooling-audit` runs pip-audit on every pin of every lock, on each pull request and every week | The job fails on an advisory that is not in its `ignore-vulns` list. `test_tooling_audit_covers_every_lock` fails when a lock is missing from the job, or an accepted ID has no reason in the comment above the list |
 | The pinned files were built by their upstream | `tooling-audit` runs `verify-signatures`: for each tool in `publishers.toml`, every locked file must carry a PyPI attestation that verifies (Sigstore) and was signed by a workflow of the named repository | The job fails on a missing or invalid attestation, another signer, or a locked hash that is not a file of that package. `test_signature_policy_names_every_pinned_tool` fails when a pinned tool is in neither table of `publishers.toml` |
 | No tool is fetched as an unverified binary | Every tool comes from a hash-locked requirements file or a SHA-pinned action | `test_no_step_downloads_an_executable` fails on a `curl`, `wget`, `gh release download`, `docker run` and the like in any run script |
+| The checked repository cannot replace a tool | The actions run in the caller's checkout, where `python -m` would import a `ruff.py`, `mypy.py`, `bandit.py`, `pip_audit.py`, `venv.py` or `pip.py` committed there instead of the real module. The scripts start every tool with `-P` (`-I` before Python 3.11), pip-audit also with `PYTHONSAFEPATH=1` for the `python -m pip` it starts itself, and `install-dependencies` creates the venv and runs pip with `-I` | `test_no_tool_runs_with_the_checkout_on_its_import_path` fails on a `python -m` started without it, or a pip-audit run without `PYTHONSAFEPATH`. `test_lint_runs_ruff_not_a_ruff_module_of_the_checkout` and its mypy, bandit and pip-audit counterparts fail when a module of that name in the checkout runs instead of the tool |
 | Every pin has an update path | `.github/dependabot.yml`: one `uv` entry per lock (Dependabot regenerates the hashes), and the folders holding third-party actions | `test_dependabot_watches_every_lock_and_action` fails when a lock or a third-party action is not covered |
 | The pre-commit hooks are the tools CI runs | Each `rev` is a full commit SHA whose `# frozen:` tag equals the CI pin; the hooks pass the org policy and thresholds | `test_pre_commit_hooks_are_the_tools_ci_runs`, and `test_pre_commit_revs_are_the_commits_of_the_tags_they_name` in CI, where the hook repositories can be asked |
 | Each scanner has its own mode | `bandit-mode`, `semgrep-mode`, `pip-audit-mode` and `ignore-vulns` in `security-scan.yml` | `test_each_scanner_has_its_own_mode_and_semgrep_its_baseline` fails when a scanner stops following its own mode, pip-audit loses `ignore-vulns`, or semgrep its baseline |
@@ -305,6 +306,17 @@ $S                  # both rulesets, at the head of main
 ```
 
 After each write the script reads the ruleset back and fails unless it holds the SHA it sent.
+
+A repository the rulesets leave out runs no org check at all, and nothing in that repository
+shows it. So every run, dry runs included, names the repositories left out (this one, those in
+`EXTRA_EXCLUDES`, those outside `TARGETS`) and, when it changes the `TARGETS` or
+`EXTRA_EXCLUDES` of a ruleset, the repositories that lose or gain that ruleset. A run that is
+not a dry run then reads what the default branch of every repository gets,
+`GET repos/{org}/{repo}/rules/branches/{branch}`, which answers for the repository and the
+organization together, one call per repository. It fails when a ruleset misses a repository it
+covers, or reaches one it leaves out. The command it suggests for repositories this one cannot
+serve repeats every setting of the run, so following it changes only `EXTRA_EXCLUDES`.
+
 Then open a pull request in one targeted repository: a run named after the workflow
 (`required-python-lint`, `required-security-scan`) must appear in its checks. Pull requests that
 were already open run it only after a new commit, a branch update, or a close and reopen.

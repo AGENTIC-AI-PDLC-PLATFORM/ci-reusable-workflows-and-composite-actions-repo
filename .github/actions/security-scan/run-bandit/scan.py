@@ -24,6 +24,10 @@ SUMMARY_MAX_ROWS = 200
 LEVELS = ("low", "medium", "high")
 # Same exclusions as the org lint policy (ruff.toml), as the path fragments bandit matches.
 EXCLUDE = "/.venv/,/build/,/dist/,/migrations/"
+# `python -m` puts the working directory, the checkout being scanned, first on the import path:
+# a bandit.py committed there would run instead of bandit. -P (Python 3.11+) leaves it off the
+# path, as -I does on older Pythons.
+SAFE_PATH = ["-P"] if sys.version_info >= (3, 11) else ["-I"]
 
 
 @dataclass(frozen=True)
@@ -40,7 +44,7 @@ class Finding:
 
 def run_checks(target: str, severity: str, confidence: str) -> list[Finding]:
     """Run bandit at the given thresholds and normalise its JSON report."""
-    cmd = [sys.executable, "-m", "bandit", "-r", target, "-q", "-x", EXCLUDE]
+    cmd = [sys.executable, *SAFE_PATH, "-m", "bandit", "-r", target, "-q", "-x", EXCLUDE]
     cmd += ["--severity-level", severity, "--confidence-level", confidence]
     cmd += ["-f", "json"]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)

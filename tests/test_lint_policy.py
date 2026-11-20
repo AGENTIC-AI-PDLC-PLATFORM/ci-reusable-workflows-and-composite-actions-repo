@@ -138,6 +138,62 @@ def test_mypy_findings_match_expected(tmp_path: Path) -> None:
     _assert_matches_expected(actual, FIXTURES / "mypy" / "expected.txt")
 
 
+# --- the checkout under check cannot replace the tool --------------------------------------
+
+LINT = ACTIONS / "run-ruff" / "lint.py"
+TYPECHECK = ACTIONS / "run-mypy" / "typecheck.py"
+# Committed in the checkout under the tool's own name, this module would show that it ran.
+IMPOSTOR = 'import pathlib\n\npathlib.Path(__file__).with_name("IMPOSTOR-RAN").touch()\n'
+
+
+def _labels_in_a_checkout_holding(
+    impostor: str, tmp_path: Path, script: Path, fixture: str, *args: str
+) -> list[str]:
+    """Run an action's script as its action does, in the caller's checkout: here, one that holds
+    the fixture and a module named after the tool. Returns the `line:code` it reports."""
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    name = Path(fixture).name.removesuffix(".txt")
+    (checkout / name).write_text((FIXTURES / fixture).read_text())
+    (checkout / impostor).write_text(IMPOSTOR)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+    result = subprocess.run(
+        [sys.executable, str(script), "--path", ".", "--mode", "report", *args],
+        capture_output=True,
+        text=True,
+        cwd=checkout,
+        env=env,
+        check=False,
+    )
+    assert not (checkout / "IMPOSTOR-RAN").exists(), (
+        f"{script.name} imported the checkout's {impostor} instead of the tool: start the tool "
+        "with SAFE_PATH (python -P, or -I before Python 3.11)"
+    )
+    assert result.returncode == 0, (
+        f"{script.name} failed (exit {result.returncode}):\n{result.stdout}{result.stderr}"
+    )
+    finding = re.compile(rf"^{re.escape(name)}:(\d+):\d+: (\S+) ")
+    matches = [match for match in map(finding.match, result.stdout.splitlines()) if match]
+    return sorted((f"{match[1]}:{match[2]}" for match in matches), key=_order)
+
+
+def test_lint_runs_ruff_not_a_ruff_module_of_the_checkout(tmp_path: Path) -> None:
+    """lint.py runs in the caller's checkout: a ruff.py committed there must not replace ruff."""
+    args = ("--config", str(RUFF_POLICY))
+    fixture = "ruff/violations.py.txt"
+    actual = _labels_in_a_checkout_holding("ruff.py", tmp_path, LINT, fixture, *args)
+    _assert_matches_expected(actual, FIXTURES / "ruff" / "expected.txt")
+
+
+def test_typecheck_runs_mypy_not_a_mypy_module_of_the_checkout(tmp_path: Path) -> None:
+    """typecheck.py runs in the caller's checkout: a mypy.py committed there must not replace
+    mypy."""
+    args = ("--config", str(MYPY_POLICY))
+    fixture = "mypy/type_errors.py.txt"
+    actual = _labels_in_a_checkout_holding("mypy.py", tmp_path, TYPECHECK, fixture, *args)
+    _assert_matches_expected(actual, FIXTURES / "mypy" / "expected.txt")
+
+
 # --- every uses: ---------------------------------------------------------------------------
 
 

@@ -22,6 +22,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SUMMARY_MAX_ROWS = 200
+# `python -m` puts the working directory, the checkout being linted, first on the import path:
+# a ruff.py committed there would run instead of ruff. -P (Python 3.11+) leaves it off the path,
+# as -I does on older Pythons.
+SAFE_PATH = ["-P"] if sys.version_info >= (3, 11) else ["-I"]
 
 
 @dataclass(frozen=True)
@@ -37,7 +41,7 @@ class Finding:
 
 def run_checks(target: str, config: str) -> list[Finding]:
     """Run ruff with the given config and normalise its JSON output."""
-    cmd = [sys.executable, "-m", "ruff", "check", target, "--config", config]
+    cmd = [sys.executable, *SAFE_PATH, "-m", "ruff", "check", target, "--config", config]
     cmd += ["--output-format", "json", "--no-cache"]
     cmd += ["--force-exclude"]  # honour excludes even for explicitly passed paths
     cmd += ["--exit-zero"]  # findings are judged below, not by ruff's exit code

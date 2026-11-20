@@ -178,6 +178,22 @@ def test_bandit_enforce_fails_and_report_does_not(tmp_path: Path) -> None:
     assert _run("bandit", BANDIT / "scan.py", "--path", "missing", cwd=fixture)[0].returncode == 2
 
 
+# Committed in the scanned checkout under the scanner's own name, this module would show that it
+# ran: the scripts run in the caller's checkout, where `python -m` looks first unless told not to.
+IMPOSTOR = 'import pathlib\n\npathlib.Path(__file__).with_name("IMPOSTOR-RAN").touch()\n'
+
+
+def test_bandit_runs_bandit_not_a_bandit_module_of_the_checkout(tmp_path: Path) -> None:
+    """A bandit.py committed in the scanned checkout must not replace bandit."""
+    fixture = _bandit_fixture(tmp_path)
+    (fixture / "bandit.py").write_text(IMPOSTOR)
+    result, _ = _run("bandit", BANDIT / "scan.py", "--mode", "report", cwd=fixture)
+    assert not (fixture / "IMPOSTOR-RAN").exists(), (
+        "scan.py imported the checkout's bandit.py instead of bandit: start it with SAFE_PATH"
+    )
+    _assert_matches_expected(_findings(result), FIXTURES / "bandit" / "expected.txt")
+
+
 # --- semgrep -------------------------------------------------------------------------------
 
 SEMGREP_FIXTURES = {
@@ -538,6 +554,24 @@ def test_pip_audit_reports_and_accepts_known_vulnerabilities(tmp_path: Path) -> 
     by_alias = f"--ignore-vuln={aliases.group(1).split(', ')[0]}"
     result, outputs = _run("pip-audit", PIP_AUDIT / "audit.py", by_alias, cwd=tmp_path)
     assert set(outputs.get("vulnerabilities", "").split()) == reported - {one}
+
+
+@online
+def test_pip_audit_runs_pip_audit_not_a_pip_audit_module_of_the_checkout(tmp_path: Path) -> None:
+    """A pip_audit.py committed in the audited checkout must not replace pip-audit, nor a pip.py
+    the pip that pip-audit starts itself to resolve requirements without hashes, as these are."""
+    fixture = (FIXTURES / "pip-audit" / "vulnerable-pins.txt").read_text()
+    (tmp_path / "requirements.txt").write_text(fixture)
+    (tmp_path / "pip_audit.py").write_text(IMPOSTOR)
+    (tmp_path / "pip.py").write_text(IMPOSTOR)
+    result, outputs = _run("pip-audit", PIP_AUDIT / "audit.py", "--mode", "report", cwd=tmp_path)
+    assert not (tmp_path / "IMPOSTOR-RAN").exists(), (
+        "the checkout's pip_audit.py or pip.py ran instead of the real module: start pip-audit "
+        "with SAFE_PATH and PYTHONSAFEPATH=1"
+    )
+    expected = set(_content_lines(FIXTURES / "pip-audit" / "expected.txt"))
+    reported = set(outputs.get("vulnerabilities", "").split())
+    assert expected <= reported, result.stdout + result.stderr
 
 
 @online
